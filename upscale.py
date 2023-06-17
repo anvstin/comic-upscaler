@@ -1,41 +1,59 @@
-import os
-import sys
-
-import zipfile
 import argparse
-
+import glob
+import os
+import re
+import subprocess
+import sys
+import zipfile
 from PIL import Image
 
-import subprocess
-import re
-import glob
 Image.MAX_IMAGE_PIXELS = None
 
-import time
-import keyboard
+import multiprocessing
+import threading # For IO
 import shutil
-import math
-import natsort
-import itertools
-import string
-import ctypes
-import unidecode
+import time
 
-# Custom modules
-from paths import PathGenerator, OutputPathGenerator
+import rich
+import rich.progress
+from rich.progress import track, Progress
+# from rich import print
+from rich.console import Console
+
+import natsort
+from paths import OutputPathGenerator, PathGenerator
+
+console = Console()
+
+if __name__ == '__main__':
+    # Call subprocess to ask for the version of python, opencv and torch (avoid loading them in the main process to avoid high memory usage)
+    p = [
+        subprocess.Popen([sys.executable, "--version"], stdout=subprocess.PIPE),
+        subprocess.Popen([sys.executable, "-c", "import cv2; print(f'cv2={cv2.__version__}')"], stdout=subprocess.PIPE),
+        subprocess.Popen([sys.executable, "-c", "import torch; print(f'torch={torch.__version__}')"], stdout=subprocess.PIPE)
+    ]
+    for process in p:
+        process.wait()
+        print(process.stdout.read().decode('utf-8').strip('\n'))
+
+
 
 # pyjion
+# if __name__ == '__main__': print(f"Importing pyjion...")
 # import pyjion
-# print(f"Pyjion: {pyjion.enable()}")
-# pyjion.config(level=2)
+# pyjion.config(level=1)
+# if __name__ == '__main__': print(f"Pyjion: {pyjion.enable()}")
 
 # os.path.sep = '/'
 
 working_dir = 'C:/Users/aurel/OneDrive/Scripts/upscale/Real-ESRGAN'
 
-model_name = 'RealESRGAN_x4plus_anime_6B'
+model_name = 'realesr-animevideov3'
+# model_name = 'RealESRGAN_x4plus_anime_6B'
 executable_path = working_dir + '/inference_realesrgan.py'
 seven_zip_path = "C:/Users/aurel/OneDrive/Scripts/upscale/7z2201-extra/7za.exe"
+
+seen_files = set()
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -47,6 +65,7 @@ def parse_args():
     parser.add_argument('-s', '--scale', type=int, default=4, help='Scale the images by')
     parser.add_argument('-w', '--width', type=int, default=0, help='Fit the images to the width')
     parser.add_argument('-t', '--tiles', type=int, default=1024, help='Split the images into tiles')
+    parser.add_argument('--tile_pad', type=int, default=50, help='Pad the tiles by')
     parser.add_argument("--remove_root_folders", type=int, default=0, help="Remove the number of folders from the root of the output path. Eg with a value of 2 : ./a/b/test.cbz -> ./test.cbz")
     parser.add_argument('--sync', action='store_true', help='Synchronize the input and output folders')
     # Compress the images after upscaling
@@ -91,7 +110,7 @@ def get_cbz_files(input_path, ignore_upscaled=False):
 
     return res
 
-def extract(file, output_path=None):
+def extract(file, output_path=None, progress=Progress(transient=True)):
     # Create a folder with the same name as the file
     folder_name = file[:-4] if output_path is None else output_path
     folder_name = os.path.abspath(folder_name)
@@ -100,9 +119,14 @@ def extract(file, output_path=None):
         os.mkdir(folder_name)
 
     # Extract the files to the folder
-    with zipfile.ZipFile(file, 'r') as zip_ref:
+    # task_id = progress.add_task(f"Extracting {file}...", total=os.path.getsize(file))
+    # add tabulation before the message to align it with the other messages
+    task_id = progress.add_task(f"    Extracting {file}...", total=os.path.getsize(file))
+    p = progress.open(file, "rb", task_id=task_id)
+    with zipfile.ZipFile(p) as zip_ref:
         zip_ref.extractall(folder_name)
-
+    p.close()
+    progress.remove_task(task_id)
     # Move the files to the root of the folder
     for file in glob.glob(folder_name + '/*/**', recursive=True):
         if os.path.isfile(file):
@@ -148,6 +172,8 @@ def fit_to_width(input_folder, width, format=None):
             continue
 
         img = Image.open(image)
+        # Using CV2 to open the image
+        # img = cv2.imdecode(np.fromfile(image, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
         if img.width < width:
             continue
 
@@ -155,39 +181,82 @@ def fit_to_width(input_folder, width, format=None):
         if ratio >= 1:
             continue
         img = img.resize((width, int(img.height * ratio)), Image.LANCZOS)
+        # Using CV2 to resize the image
+        # img = cv2.resize(img, (width, int(img.height * ratio)), interpolation=cv2.INTER_LANCZOS4)
 
         # Save the image
         img.save(image, format=format)
+        # Using CV2 to save the image
+        # cv2.imencode(re.search(r'\.([a-zA-Z]+)$', image).group(1), img)[1].tofile(image)
         print(f"  {i + 1}/{size} {os.path.basename(image)}", end='\r')
 
 
 def compress(folder, output_path):
     # Compress the folder to a cbz file
-    ret = subprocess.run([seven_zip_path, 'a', output_path, folder + '/*'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ret = subprocess.run([seven_zip_path, "-tzip", 'a', output_path, folder + '/*'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if ret.returncode != 0:
         raise Exception(f"Failed to compress {folder} to {output_path}")
 
+# Namespace
+from argparse import Namespace
 
-end_after_upscaling = False
-def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024):
-    global end_after_upscaling
-    args = ["python", executable_path, '-i', input_path, '-o', output_path, '-n', model_name, '-s', str(scale), "-t", f"{tiles}", "--tile_pad", "10", "--width", str(width)]
+def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wait=True, tile_pad=50):
+    args = ["python", executable_path, '-i', input_path, '-o', output_path, '-n', model_name, '-s', f"{scale}", "-t", f"{tiles}", "--tile_pad", f"{tile_pad}", "--width", f"{width}"]
+    # args = ["python", executable_path, '-i', input_path, '-o', output_path, '-n', model_name, '-s', str(scale), "-t", f"{tiles}", "--tile_pad", "10", "--width", str(width), "--fp32"]
     if format is not None:
         args += ['--ext', format]
 
     # print("Running:", args[0], *[f"'{arg}'" for arg in args[1:] ])
-
-    end_after_upscaling = False
+    # Environment variables
     ret = subprocess.Popen(args, stdout=sys.stdout, stderr=sys.stderr)
-    while ret.poll() is None:
-        # Check if the user has pressed q to quit after the upscaling
-        if keyboard.is_pressed('q') and keyboard.is_pressed('ctrl') and not end_after_upscaling:
-            print("<<< User pressed ctrl + q, no more files will be processed after the current one >>>")
-            end_after_upscaling = True
-        time.sleep(0.1)
+    if wait:
+        ret.wait()
 
-    if ret.returncode != 0:
+    # end_after_upscaling = (False)
+    # while ret.poll() is None:
+    #     # Check if the user has pressed q to quit after the upscaling
+    #     if keyboard.is_pressed('shift') and keyboard.is_pressed('q') and keyboard.is_pressed('ctrl') and not end_after_upscaling:
+    #         print("<<< User pressed ctrl + q, no more files will be processed after the current one >>>")
+    #         end_after_upscaling = True
+    #     time.sleep(0.1)
+
+    if wait and ret.returncode != 0:
         raise Exception("Upscaling failed")
+
+    # Check length of output folder to see if it the same as the input folder
+    input_length = len(glob.glob(input_path + '/**', recursive=True))
+    output_length = len(glob.glob(output_path + '/**', recursive=True))
+    if input_length != output_length:
+        print(f"ERROR: Input length ({input_length}) does not match output length ({output_length})")
+        print("Continuing anyway...")
+
+    return ret
+
+def upscale_parallel(input_path, output_path, scale, format=None, width=0, tiles=1024, thread_count=2):
+    # Get all the files in the input path
+    files = glob.glob(input_path + '/**', recursive=True)
+    files = [f for f in files if not os.path.isdir(f)]
+    if format is not None:
+        files = [f for f in files if f.endswith(f'.{format}')]
+
+    # Split the files into chunks
+    subprocesses = []
+    while len(files) > 0:
+        if len(subprocesses) >= thread_count:
+            # Wait for a thread to finish
+            for t in subprocesses:
+                if t.poll() is not None:
+                    subprocesses.remove(t)
+                    break
+            time.sleep(0.1)
+        else:
+            f = files[0]
+            print(f"Upscaling {f} to {f.replace(input_path, output_path)}")
+            # threads.append(threading.Thread(target=upscale, args=(f, output_path, scale, format, width, tiles)))
+            subprocesses.append(upscale(f, output_path, scale, format, width, tiles, wait=False, tile_pad=args.tile_pad))
+            # upscale(f, output_path, scale, format, width, tiles, wait=True)
+            files.pop(0)
+
 
 def rm_tree(path):
     try:
@@ -198,30 +267,80 @@ def rm_tree(path):
 def normalize_path(path):
     return os.path.abspath(os.path.normpath(path))
 
-seen_files = set()
 def sync(args):
-    global seen_files
+    wanted_outputs = set()
+    for f in track(get_cbz_files(args.input), description="Getting library output paths...", transient=True):
+        gen = OutputPathGenerator.from_args(args, f)
+        wanted_outputs.update(map(lambda x: x.lower(), gen.possible_paths()))
 
-    paths = set()
-    for f in seen_files:
-        gen = OutputPathGenerator(args, f)
-        paths.update(gen.possible_paths())
+    # Thread
+    # threads = []
 
-    paths = {normalize_path(p) for p in paths}
-
-    out_paths = get_cbz_files(args.output, ignore_upscaled=False)
-    out_paths = {normalize_path(p) for p in out_paths}
-    for p in out_paths:
-        if p not in paths:
+    for p in track(get_cbz_files(args.output), description="Removing unused comics...", transient=True):
+        if p.lower() not in wanted_outputs:
             print(f"Removing {p}")
-            # os.remove(p)
-            # folder = os.path.dirname(p)
-            # if len(os.listdir(folder)) == 0:
-            #     os.rmdir(folder)
+            try:
+                os.remove(p)
+                # threads.append(threading.Thread(target=os.remove, args=(p,)))
+
+            except OSError as e:
+                print("Error: %s : %s" % (p, e.strerror))
+
+    # for t in threads:
+    #     t.start()
+
+    # # Wait for all threads to finish
+    # for t in track(threads, description="Removing unused comics...", transient=True):
+    #     t.join()
+
+    # threads = []
+    # Remove other files and folders
+    for root, dirs, files in track(os.walk(args.output, topdown=False), description="Removing other files...", transient=True):
+        for name in files:
+            file = os.path.join(root, name)
+            if file.lower() not in wanted_outputs:
+                print(f"Removing {file}")
+                os.remove(file)
+                #Threading for IO
+                # threads.append(threading.Thread(target=os.remove, args=(file,)))
+
+    # for t in threads:
+    #     t.start()
+
+    # # Wait for all threads to finish
+    # for t in track(threads, description="Removing other files...", transient=True):
+    #     t.join()
 
 
-def main(args):
-    global seen_files
+def prune_empty_folders(path):
+    # threads = []
+    for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...", transient=True):
+        for name in dirs:
+            folder = os.path.join(root, name)
+            try:
+                if len(os.listdir(folder)) == 0:
+                    print(f"Removing empty folder {folder}")
+                    os.rmdir(folder)
+                    # threads.append(threading.Thread(target=os.rmdir, args=(folder,)))
+            except OSError as e:
+                print("Error: %s : %s" % (folder, e.strerror))
+
+    # for t in threads:
+    #     t.start()
+
+    # # Wait for all threads to finish
+    # for t in track(threads, description="Removing empty folders...", transient=True):
+    #     t.join()
+
+
+def get_input_dir(input_path):
+    input_directory = os.path.abspath(input_path)
+    if not os.path.isdir(input_path):
+        input_directory = os.path.dirname(input_directory)
+    return input_directory
+
+
+def main(args, params):
 
     # Get the list of .cbz files
     found_paths = get_cbz_files(args.input, ignore_upscaled=True)
@@ -233,59 +352,57 @@ def main(args):
     if len(paths) == 0:
         return 0
     print(f"Found {len(paths)} files")
-    input_directory = os.path.abspath(args.input)
-    if not os.path.isdir(args.input):
-        input_directory = os.path.dirname(input_directory)
+    input_directory = get_input_dir(args.input)
 
     # Process each .cbz file
-    for i, file in enumerate(paths):
-        if file in seen_files:
-            continue
-        seen_files.add(file)
+    with Progress() as progress:
+        progress_bar = progress.add_task("Processing files...", total=len(paths))
+        for i, file in enumerate(paths):
+            progress.update(progress_bar, advance=1)
+            if params.end_after_upscaling:
+                print("<<< Exiting... >>>")
+                exit()
+            if file in seen_files:
+                continue
 
-        if not os.path.exists(file):
-            print(f"Skipping {os.path.relpath(file, args.input)} (does not exist)")
-            paths[i] = None
-            continue
+            seen_files.add(file)
+            if not os.path.exists(file):
+                print(f"Skipping {os.path.relpath(file, args.input)} (does not exist)")
+                paths[i] = None
+                continue
 
-        gen = OutputPathGenerator(args, file)
+            gen = OutputPathGenerator.from_args(args, file)
+            if gen.exists():
+                print(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
+                paths[i] = None
+                continue
+            print(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(paths)})")
+            print(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
 
-        if gen.exists():
-            print(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
-            seen_files.update(gen.possible_paths())
-            paths[i] = None
-            continue
-        print(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(paths)})")
-        print(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
+            print(f"    Extracting to {os.path.basename(gen.extract_path)}")
+            os.makedirs(gen.extract_path, exist_ok=True)
+            extract(file, gen.extract_path, progress=progress)
 
-        print(f"    Extracting to {os.path.basename(gen.extract_path)}")
-        os.makedirs(gen.extract_path, exist_ok=True)
-        extract(file, gen.extract_path)
+            print(f"    Upscaling to {os.path.basename(gen.upscale_path)} ({len(os.listdir(gen.extract_path))} images)")
+            os.makedirs(gen.upscale_path, exist_ok=True)
+            # Hide progress bar temporarily
+            progress.update(progress_bar, visible=False)
+            upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles)
+            progress.update(progress_bar, visible=False)
+            rm_tree(gen.extract_path)
 
-        print(f"    Upscaling to {os.path.basename(gen.upscale_path)} ({len(os.listdir(gen.extract_path))} images)")
-        os.makedirs(gen.upscale_path, exist_ok=True)
-        upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles)
+            # print(f"    Fitting images to width", args.width)
+            # fit_to_width(upscale_path, args.width)
 
-        rm_tree(gen.extract_path)
+            print(f"    Writing final images to {gen.output_path}")
+            if args.compress:
+                compress(gen.upscale_path, gen.output_path)
+                rm_tree(gen.upscale_path)
+            else:
+                os.rename(gen.upscale_path, gen.output_path)
 
-        # print(f"    Fitting images to width", args.width)
-        # fit_to_width(upscale_path, args.width)
-
-        print(f"    Writing final images to {gen.output_path}")
-        if args.compress:
-            compress(gen.upscale_path, gen.output_path)
-            rm_tree(gen.upscale_path)
-        else:
-            os.rename(gen.upscale_path, gen.output_path)
-
-        print(f"Done {os.path.basename(file)} ({i + 1}/{len(paths)})")
-        if end_after_upscaling:
-            print("<<< Exiting... >>>")
-            exit()
-
-    if args.sync:
-        print("Syncing...")
-        sync(args)
+            print(f"Done {os.path.basename(file)} ({i + 1}/{len(paths)})")
+        progress.stop()
 
     # if all paths are in seen_files, return 0
     if all([path in seen_files for path in paths if path is not None]):
@@ -293,26 +410,40 @@ def main(args):
 
     return len([path for path in paths if path is not None])
 
-def print_sleep(duration: int, step: int = 5):
-    for i in range(0, duration, step):
-        print(f"\033[KSleeping for {duration - i} seconds... ", end='\r')
-        time.sleep(5)
-    print("\033[K", end='\r')
+# def print_sleep(duration: int, step: int = 5):
+#     for i in range(0, duration, step):
+#         print(f"\033[KSleeping for {duration - i} seconds... ", end='\r')
+#         time.sleep(step)
+#     print("\033[K", end='\r')
 
-if __name__ == '__main__':
-    args = parse_args()
+def print_sleep(duration: int, step: int = 0.5):
+    # Use rich to print sleep
+    with Progress(speed_estimate_period=2, transient=True) as progress:
+        task = progress.add_task("Sleeping...", total=duration)
+        nb_iter = int(duration / step)
+        for i in range(nb_iter):
+            progress.update(task, advance=step)
+            time.sleep(step)
+        time.sleep(duration % step)
+        progress.stop()
 
-    # Print all the arguments
-    print("Arguments:")
-    argparse_dict = vars(args)
-    for key in argparse_dict:
-        print(f"  {key}: {argparse_dict[key]}")
-    print()
 
-    count = -1
+def start_processing(args, params):
+    count = -100
     while True:
-        print("\033[K", end='\r')
-        count = main(args)
+        count = -1
+        while count != 0:
+            print("\033[K", end='\r')
+            count = main(args, params)
+
+        if args.sync:
+            print("Syncing...", end='\r')
+            sync(args)
+            params.need_pruning = True
+
+        if params.need_pruning:
+            prune_empty_folders(args.output)
+            params.need_pruning = False
 
         print(f"Done {count} files")
         if count == 0:
@@ -322,3 +453,57 @@ if __name__ == '__main__':
             print_sleep(60)
         else:
             print("\033[KChecking for new files...", end='\r')
+
+def terminal(args, params):
+    sys.stdin = open(0)
+    while True:
+        cmd = input()
+        if cmd == "sync":
+            sync(args)
+            params.need_pruning = (True)
+        elif cmd == "q":
+            params.end_after_upscaling = (True)
+            print("<<< User pressed q, no more files will be processed after the current one >>>")
+        else:
+            print("Unknown command")
+
+if __name__ == '__main__':
+    manager = multiprocessing.Manager()
+    params = manager.Namespace()
+    params.end_after_upscaling = False
+    params.need_pruning = False
+
+    args = parse_args()
+
+    # Print all the arguments
+    print("Arguments:")
+    argparse_dict = vars(args)
+    for key in argparse_dict:
+        print(f"  {key}: {argparse_dict[key]}")
+    print()
+
+    # Start the processing
+    p = multiprocessing.Process(target=start_processing, args=(args,params))
+    p.start()
+
+    # Start a terminal to run commands
+    p2 = multiprocessing.Process(target=terminal, args=(args,params))
+    p2.start()
+
+    # Wait for the processes to finish
+    while True:
+        if not p.is_alive():
+            break
+        if not p2.is_alive():
+            break
+        time.sleep(1)
+
+    # Kill the processes
+    p.terminate()
+    p2.terminate()
+
+
+
+
+
+
