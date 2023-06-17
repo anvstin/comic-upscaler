@@ -1,0 +1,3 @@
+[submodule "Real-ESRGAN"]
+	path = Real-ESRGAN
+	url = git@github.com:anvstin/Real-ESRGAN.git
