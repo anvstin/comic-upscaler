@@ -44,9 +44,9 @@ if __name__ == '__main__':
 # pyjion.config(level=1)
 # if __name__ == '__main__': print(f"Pyjion: {pyjion.enable()}")
 
-# os.path.sep = '/'
-
-working_dir = 'C:/Users/aurel/OneDrive/Scripts/upscale/Real-ESRGAN'
+script_dir = os.path.dirname(os.path.realpath(__file__))
+# Get script directory
+working_dir = os.path.join(script_dir, "Real-ESRGAN")
 
 model_name = 'realesr-animevideov3'
 # model_name = 'RealESRGAN_x4plus_anime_6B'
@@ -191,11 +191,57 @@ def fit_to_width(input_folder, width, format=None):
         print(f"  {i + 1}/{size} {os.path.basename(image)}", end='\r')
 
 
-def compress(folder, output_path):
+def compress_seven_zip(folder, output_path):
     # Compress the folder to a cbz file
+    if not os.path.exists(seven_zip_path):
+        raise Exception(f"7z.exe not found at {seven_zip_path}")
+
     ret = subprocess.run([seven_zip_path, "-tzip", 'a', output_path, folder + '/*'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if ret.returncode != 0:
         raise Exception(f"Failed to compress {folder} to {output_path}")
+
+def get_size(folder):
+    size = 0
+    for file in glob.glob(folder + '/**', recursive=True):
+        if os.path.isdir(file):
+            continue
+        size += os.path.getsize(file)
+    return size
+
+def compress_integrated(folder, output_path, progress=Progress(transient=True)):
+    """
+    Compress the folder to a cbz file using standard python libraries
+
+    Args:
+        folder (str): The folder to compress
+        output_path (str): The path to the output file
+        progress (Progress): The progress bar to use
+    """
+
+    # Compress the folder to a cbz file using standard python libraries
+    # Integraded version seems to have trouble with network drives, use 7zip in those cases
+    task_id = progress.add_task(f"    Compressing {folder}...", total=get_size(folder))
+
+    p = progress.open(output_path, "wb", task_id=task_id)
+    with zipfile.ZipFile(p, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
+        for file in glob.glob(folder + '/**', recursive=True):
+            if os.path.isdir(file):
+                continue
+            zip_ref.write(file, os.path.relpath(file, folder))
+            progress.update(task_id, advance=os.path.getsize(file))
+
+def compress(folder, output_path):
+    """
+    Compress the folder to a cbz file and select the best method
+
+    Args:
+        folder (str): The folder to compress
+        output_path (str): The path to the output file
+    """
+    if os.path.exists(seven_zip_path):
+        compress_seven_zip(folder, output_path)
+    else:
+        compress_integrated(folder, output_path)
 
 # Namespace
 from argparse import Namespace
