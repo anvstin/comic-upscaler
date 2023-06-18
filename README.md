@@ -22,5 +22,10 @@ The script has numerous customization options, you can see them with:
 python3 upscale.py --help
 ```
 
-## This script use the following projects:
- - [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
+## Project used
+
+- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
+
+## Authors
+
+- [**Aurélien Visentin**](https://github.com/anvstin)
