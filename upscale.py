@@ -48,8 +48,7 @@ script_dir = os.path.dirname(os.path.realpath(__file__))
 # Get script directory
 working_dir = os.path.join(script_dir, "Real-ESRGAN")
 
-model_name = 'realesr-animevideov3'
-# model_name = 'RealESRGAN_x4plus_anime_6B'
+model_name = 'realesr-animevideov3' # 'RealESRGAN_x4plus_anime_6B'
 executable_path = working_dir + '/inference_realesrgan.py'
 seven_zip_path = "C:/Users/aurel/OneDrive/Scripts/upscale/7z2201-extra/7za.exe"
 
@@ -191,12 +190,14 @@ def fit_to_width(input_folder, width, format=None):
         print(f"  {i + 1}/{size} {os.path.basename(image)}", end='\r')
 
 
-def compress_seven_zip(folder, output_path):
+def compress_seven_zip(folder, output_path, progress=Progress(transient=True)):
     # Compress the folder to a cbz file
     if not os.path.exists(seven_zip_path):
         raise Exception(f"7z.exe not found at {seven_zip_path}")
 
+    task_id = progress.add_task(f"    Compressing {folder}...", total=None)
     ret = subprocess.run([seven_zip_path, "-tzip", 'a', output_path, folder + '/*'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    progress.remove_task(task_id)
     if ret.returncode != 0:
         raise Exception(f"Failed to compress {folder} to {output_path}")
 
@@ -222,13 +223,14 @@ def compress_integrated(folder, output_path, progress=Progress(transient=True)):
     # Integraded version seems to have trouble with network drives, use 7zip in those cases
     task_id = progress.add_task(f"    Compressing {folder}...", total=get_size(folder))
 
-    p = progress.open(output_path, "wb", task_id=task_id)
-    with zipfile.ZipFile(p, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
+    with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
         for file in glob.glob(folder + '/**', recursive=True):
             if os.path.isdir(file):
                 continue
             zip_ref.write(file, os.path.relpath(file, folder))
             progress.update(task_id, advance=os.path.getsize(file))
+
+    progress.remove_task(task_id)
 
 def compress(folder, output_path):
     """
@@ -242,9 +244,6 @@ def compress(folder, output_path):
         compress_seven_zip(folder, output_path)
     else:
         compress_integrated(folder, output_path)
-
-# Namespace
-from argparse import Namespace
 
 def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wait=True, tile_pad=50):
     args = ["python", executable_path, '-i', input_path, '-o', output_path, '-n', model_name, '-s', f"{scale}", "-t", f"{tiles}", "--tile_pad", f"{tile_pad}", "--width", f"{width}"]
