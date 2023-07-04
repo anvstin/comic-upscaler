@@ -60,6 +60,7 @@ def parse_args():
     parser.add_argument('--tile_pad', type=int, default=50, help='Pad the tiles by')
     parser.add_argument("--remove_root_folders", type=int, default=0, help="Remove the number of folders from the root of the output path. Eg with a value of 2 : ./a/b/test.cbz -> ./test.cbz")
     parser.add_argument('--sync', action='store_true', help='Synchronize the input and output folders')
+    parser.add_argument("--fp32", action='store_true', help="Use fp32 instead of fp16")
     # Compress the images after upscaling
     parser.add_argument('-c', '--compress', action='store_true', help='Compress the images after upscaling')
     parser.add_argument("--suffix", default="_upscaled", help="Suffix to add to the output file name", nargs='?')
@@ -233,14 +234,17 @@ def compress(folder, output_path):
         folder (str): The folder to compress
         output_path (str): The path to the output file
     """
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     if os.path.exists(SEVEN_ZIP_PATH):
         compress_seven_zip(folder, output_path)
     else:
         compress_integrated(folder, output_path)
 
-def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wait=True, tile_pad=50):
+def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wait=True, tile_pad=50, fp32=False):
     args = ["python", UPSCALE_SCRIPT_PATH, '-i', input_path, '-o', output_path, '-n', MODEL_NAME, '-s', f"{scale}", "-t", f"{tiles}", "--tile_pad", f"{tile_pad}", "--width", f"{width}"]
     # args = ["python", executable_path, '-i', input_path, '-o', output_path, '-n', model_name, '-s', str(scale), "-t", f"{tiles}", "--tile_pad", "10", "--width", str(width), "--fp32"]
+    if fp32:
+        args += ["--fp32"]
     if format is not None:
         args += ['--ext', format]
 
@@ -264,9 +268,11 @@ def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wa
     # Check length of output folder to see if it the same as the input folder
     input_length = len(glob.glob(input_path + '/**', recursive=True))
     output_length = len(glob.glob(output_path + '/**', recursive=True))
-    if input_length != output_length:
-        print(f"ERROR: Input length ({input_length}) does not match output length ({output_length})")
-        print("Continuing anyway...")
+    if input_length > output_length:
+        print(f"ERROR: Input length ({input_length}) superior to output length ({output_length})")
+        raise Exception("Upscaling failed. Missing images")
+    elif input_length < output_length:
+        print(f"WARNING: Input length ({input_length}) inferior to output length ({output_length}). Could be due to an image being split into multiple images.")
 
     return ret
 
@@ -291,7 +297,7 @@ def upscale_parallel(input_path, output_path, scale, format=None, width=0, tiles
             f = files[0]
             print(f"Upscaling {f} to {f.replace(input_path, output_path)}")
             # threads.append(threading.Thread(target=upscale, args=(f, output_path, scale, format, width, tiles)))
-            subprocesses.append(upscale(f, output_path, scale, format, width, tiles, wait=False, tile_pad=args.tile_pad))
+            subprocesses.append(upscale(f, output_path, scale, format, width, tiles, wait=False, tile_pad=args.tile_pad, fp32=args.fp32))
             # upscale(f, output_path, scale, format, width, tiles, wait=True)
             files.pop(0)
 
@@ -425,7 +431,7 @@ def main(args, params):
             os.makedirs(gen.upscale_path, exist_ok=True)
             # Hide progress bar temporarily
             progress.update(progress_bar, visible=False)
-            upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles)
+            upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles, fp32=args.fp32)
             progress.update(progress_bar, visible=False)
             rm_tree(gen.extract_path)
 
