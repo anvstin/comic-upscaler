@@ -1,4 +1,4 @@
-name: upscale
+name: upscalee
 channels:
   - pytorch
   - nvidia
@@ -11,15 +11,16 @@ dependencies:
   - torchaudio
   - numpy
   - pytorch-cuda=11.8
-  - conda-forge::libwebp
+  - imageio
+  - natsort
+  - tqdm
+  - facexlib>=0.2.5
+  - libwebp
+  - rich
+  - pillow
+  - unidecode
   - conda-forge::opencv
   - pip:
-    - rich
-    - unidecode
-    - pillow
-    - natsort
-    - imageio
     - basicsr>=1.4.2
-    - facexlib>=0.2.5
     - gfpgan>=1.3.5
     - tqdm
