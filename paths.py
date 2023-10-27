@@ -33,11 +33,11 @@ class OutputPathGenerator(PathGenerator):
     allowed_characters = string.ascii_letters + string.digits + " -_().,;':/\\"
 
     @staticmethod
-    def from_args(args, file):
+    def from_args(args, file) -> "OutputPathGenerator":
         return OutputPathGenerator(file, args.input, args.output, args.suffix, args.compress, args.rename, args.remove_root_folders)
 
     @staticmethod
-    def from_dict(d, file):
+    def from_dict(d, file) -> "OutputPathGenerator":
         return OutputPathGenerator(file, d["input"], d["output"], d["suffix"], d["compress"], d["rename"], d["remove_root_folders"])
 
     def __init__(self, file, input_path, output_path, suffix, compress, rename, remove_root_folders):
