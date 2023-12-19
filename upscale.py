@@ -320,8 +320,11 @@ def sync_files(args, file_mapping: dict):
     for f in track(file_mapping.keys(), description="Removing upscaled files...", transient=True):
         if not os.path.exists(f):
             print(f"Removing (comic) {f}")
-            os.remove(file_mapping[f])
-            file_mapping.pop(f)
+            try:
+                os.remove(file_mapping[f])
+                file_mapping.pop(f)
+            except:
+                print(f"    <<< Error removing {file_mapping[f]} >>>")
 
     wanted_outputs = {x.lower() for x in file_mapping.values()}
 
@@ -331,7 +334,10 @@ def sync_files(args, file_mapping: dict):
             file = os.path.join(root, name)
             if file.lower() not in wanted_outputs:
                 print(f"Removing (other) {file}")
-                os.remove(file)
+                try:
+                    os.remove(file)
+                except:
+                    print(f"    <<< Error removing {file} >>>")
 
 
 def prune_empty_folders(path):
