@@ -4,10 +4,6 @@ import os
 import re
 import subprocess
 import sys
-from PIL import Image
-
-Image.MAX_IMAGE_PIXELS = None
-
 import multiprocessing
 import time
 
@@ -18,7 +14,7 @@ from rich.console import Console
 import natsort
 from paths import OutputPathGenerator
 from global_config import *
-from utils.files import get_input_dir, rm_tree, prune_empty_folders
+from utils.files import get_closest_dir, rm_tree, prune_empty_folders
 from utils.compression import compress, extract
 
 console = Console()
@@ -78,58 +74,6 @@ def get_cbz_files(input_path, ignore_upscaled=False):
         res.append(input_path)
 
     return res
-
-def divide(input_folder, output_folder, divide, format=None):
-    if divide <= 1:
-        return
-
-    # Divide the images by 2 to reduce the size
-    dirs = os.listdir(input_folder)
-    size = len(dirs)
-
-    print(f"  0/{size}")
-    for i, image in enumerate(dirs):
-        if os.path.isdir(image):
-            continue
-        if image.endswith(f'.{format}'):
-            img = Image.open(input_folder + '/' + image)
-            img = img.resize((int(img.width / divide), int(img.height / divide)), Image.LANCZOS)
-            img.save(output_folder + '/' + image, format=format)
-            print(f"  {i + 1}/{size} {image}", end='\r')
-
-        # Replace print
-
-def fit_to_width(input_folder, width, format=None):
-    if width <= 0:
-        return
-    # Walk each image and resize it to fit the width
-    paths = list(enumerate(glob.glob(input_folder + '/**', recursive=True)))
-    size = len(paths)
-    for i, image in paths:
-        if  format is not None and  not image.endswith(f'.{format}'):
-            continue
-        if os.path.isdir(image):
-            continue
-
-        img = Image.open(image)
-        # Using CV2 to open the image
-        # img = cv2.imdecode(np.fromfile(image, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
-        if img.width < width:
-            continue
-
-        ratio = width / img.width
-        if ratio >= 1:
-            continue
-        img = img.resize((width, int(img.height * ratio)), Image.LANCZOS)
-        # Using CV2 to resize the image
-        # img = cv2.resize(img, (width, int(img.height * ratio)), interpolation=cv2.INTER_LANCZOS4)
-
-        # Save the image
-        img.save(image, format=format)
-        # Using CV2 to save the image
-        # cv2.imencode(re.search(r'\.([a-zA-Z]+)$', image).group(1), img)[1].tofile(image)
-        print(f"  {i + 1}/{size} {os.path.basename(image)}", end='\r')
-
 
 
 def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wait=True, tile_pad=50, fp32=False):
@@ -198,7 +142,7 @@ def main(args, params, file_mapping: dict):
     if len(paths) == 0:
         return 0
     print(f"Found {len(paths)} files")
-    input_directory = get_input_dir(args.input)
+    input_directory = get_closest_dir(args.input)
 
     # Process each .cbz file
     with Progress() as progress:
@@ -269,7 +213,14 @@ def main(args, params, file_mapping: dict):
 
     return len([path for path in paths if path is not None])
 
-def print_sleep(duration: int, step: int = 0.5):
+def print_sleep(duration: int, step: int = 0.5) -> None:
+    """
+    Print a sleep with a progress bar
+
+    Args:
+        duration (int): The duration of the sleep
+        step (int, optional): The step of the progress bar. Defaults to 0.5.
+    """
     # Use rich to print sleep
     with Progress(speed_estimate_period=2, transient=True) as progress:
         task = progress.add_task("Sleeping...", total=duration)

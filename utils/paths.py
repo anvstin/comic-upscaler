@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-def get_program_path(program_name):
+def get_program_path(program_name: str) -> str:
     """
     Get the path to the program with the given name
 
@@ -21,5 +21,14 @@ def get_program_path(program_name):
     except subprocess.CalledProcessError:
         return None
 
-def normalize_path(path):
+def cleanup_path(path: str) -> str:
+    """
+    Normalize a path and convert it to an absolute path
+
+    Args:
+        path (str): The path to normalize
+
+    Returns:
+        str: The normalized path
+    """
     return os.path.abspath(os.path.normpath(path))

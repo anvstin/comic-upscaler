@@ -7,7 +7,7 @@ from utils.files import get_size, rm_tree
 from utils.paths import get_program_path
 from global_config import SEVEN_ZIP_PATH
 
-def compress(folder, output_path):
+def compress(folder: str, output_path: str) -> None:
     """
     Compress the folder to a cbz file and select the best method
 
@@ -27,7 +27,7 @@ def compress(folder, output_path):
         compress_seven_zip(folder, output_path, seven_zip_path)
 
 
-def compress_integrated(folder, output_path, progress=Progress(transient=True)):
+def compress_integrated(folder: str, output_path: str, progress=Progress(transient=True)) -> None:
     """
     Compress the folder to a cbz file using standard python libraries
 
@@ -50,7 +50,7 @@ def compress_integrated(folder, output_path, progress=Progress(transient=True)):
 
     progress.remove_task(task_id)
 
-def compress_seven_zip(folder, output_path, seven_zip_path, progress=Progress(transient=True)):
+def compress_seven_zip(folder: str, output_path: str, seven_zip_path: str, progress=Progress(transient=True)) -> None:
     """
     Compress a folder to a cbz file using 7z.exe
 
@@ -69,7 +69,7 @@ def compress_seven_zip(folder, output_path, seven_zip_path, progress=Progress(tr
         raise Exception(f"Failed to compress {folder} to {output_path}")
 
 
-def extract(file, output_path=None, progress=Progress(transient=True)):
+def extract(file: str, output_path: str = None, progress=Progress(transient=True)) -> str:
     """
     Extract a zip file to a folder
 

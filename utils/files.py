@@ -50,7 +50,7 @@ def prune_empty_folders(path: str) -> None:
             except OSError as e:
                 print("Error: %s : %s" % (folder, e.strerror))
 
-def get_input_dir(input_path: str) -> str:
+def get_closest_dir(input_path: str) -> str:
     """
     Get the directory of the input path.
     If it is a file, get the directory of the file, otherwise return the directory itself.
