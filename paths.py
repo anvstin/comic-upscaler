@@ -5,9 +5,9 @@ import ctypes
 import os
 import re
 import unidecode
-import copy
-import functools
 from functools import cached_property, cache
+import sys
+from global_config import RAMDISK_LETTER
 
 class PathGenerator(object):
 
@@ -20,7 +20,9 @@ class PathGenerator(object):
                 map(lambda x:ord(x) - ord('0'), bin(drive_bitmask)[:1:-1])))
 
     @staticmethod
-    def apply_ramdisk(output_as_folder, letter="R:"):
+    def apply_ramdisk(output_as_folder, letter=RAMDISK_LETTER):
+        if letter is None or sys.platform != "win32":
+            return output_as_folder
         # Check if drive letter R: is mounted in windows
         ramdisk = letter.strip(":") in PathGenerator.get_available_drives()
         if ramdisk:
