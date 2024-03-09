@@ -8,6 +8,13 @@ Animated WEBP are not supported and will be converted to a static image (the fir
 
 ## Requirements
 
+When cloning the repo, use the --recurse option. If not, in the repo folder, type :
+
+```
+git submodule init
+git submodule update
+```
+
 Use conda to install the requirements:
 
 ```bash
