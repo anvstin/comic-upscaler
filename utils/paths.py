@@ -14,7 +14,7 @@ def get_program_path(program_name: str) -> str:
     try:
         # Windows
         if os.name == 'nt':
-            return subprocess.check_output(['where', program_name]).decode().strip()
+            return subprocess.check_output(['where', program_name], stderr=subprocess.DEVNULL).decode().strip()
         # Linux and MacOS
         else:
             return subprocess.check_output(['which', program_name]).decode().strip()
