@@ -10,7 +10,7 @@ Animated WEBP are not supported and will be converted to a static image (the fir
 
 When cloning the repo, use the --recurse option. If not, in the repo folder, type :
 
-```
+```bash
 git submodule init
 git submodule update
 ```
@@ -43,3 +43,7 @@ python3 upscale.py --help
 ## Authors
 
 - [**Aurélien Visentin**](https://github.com/anvstin)
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
