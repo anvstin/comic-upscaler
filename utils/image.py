@@ -3,7 +3,16 @@ import glob
 from PIL import Image
 Image.MAX_IMAGE_PIXELS = None
 
-def divide(input_folder, output_folder, divide, format=None):
+def divide(input_folder: str, output_folder: str, divide: int, format=None):
+    """
+    Divide the images in the input folder by the divide factor and save them in the output folder
+
+    Args:
+        input_folder (str): The input folder
+        output_folder (str): The output folder
+        divide (int): The divide factor
+        format (str, optional): The format of the images. Defaults to None.
+    """
     if divide <= 1:
         return
 
@@ -23,7 +32,16 @@ def divide(input_folder, output_folder, divide, format=None):
 
         # Replace print
 
-def fit_to_width(input_folder, width, format=None):
+def fit_to_width(input_folder: str, width: int, format: str|None=None):
+    """
+    Resize all images in the input folder to fit the width
+
+    Args:
+        input_folder (str): The input folder
+        width (int): The width to fit
+        format (str, optional): The format of the images. Defaults to None.
+
+    """
     if width <= 0:
         return
     # Walk each image and resize it to fit the width

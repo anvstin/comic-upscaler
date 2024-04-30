@@ -8,6 +8,7 @@ import unidecode
 from functools import cached_property, cache
 import sys
 from global_config import RAMDISK_LETTER
+from argparse import Namespace
 
 class PathGenerator(object):
 
@@ -20,7 +21,7 @@ class PathGenerator(object):
                 map(lambda x:ord(x) - ord('0'), bin(drive_bitmask)[:1:-1])))
 
     @staticmethod
-    def apply_ramdisk(output_as_folder, letter=RAMDISK_LETTER):
+    def apply_ramdisk(output_as_folder: str, letter: str|None = RAMDISK_LETTER):
         if letter is None or sys.platform != "win32":
             return output_as_folder
         # Check if drive letter R: is mounted in windows
@@ -35,14 +36,14 @@ class OutputPathGenerator(PathGenerator):
     allowed_characters = string.ascii_letters + string.digits + " -_().,;':/\\"
 
     @staticmethod
-    def from_args(args, file) -> "OutputPathGenerator":
+    def from_args(args: Namespace, file: str) -> "OutputPathGenerator": # type: ignore
         return OutputPathGenerator(file, args.input, args.output, args.suffix, args.compress, args.rename, args.remove_root_folders)
 
     @staticmethod
-    def from_dict(d, file) -> "OutputPathGenerator":
+    def from_dict(d: dict, file: str) -> "OutputPathGenerator": # type: ignore
         return OutputPathGenerator(file, d["input"], d["output"], d["suffix"], d["compress"], d["rename"], d["remove_root_folders"])
 
-    def __init__(self, file, input_path, output_path, suffix, compress, rename, remove_root_folders):
+    def __init__(self, file: str, input_path: str, output_path: str, suffix: str, compress: bool, rename: bool, remove_root_folders: int):
         super().__init__()
 
         self.file = file
@@ -82,7 +83,7 @@ class OutputPathGenerator(PathGenerator):
             input_directory = os.path.dirname(input_directory)
         return input_directory
 
-    def remove_invalid_characters(self, path):
+    def remove_invalid_characters(self, path: str):
         # path = unidecode.unidecode(path, errors="preserve")
         # Convert all characters to ascii
         path = "".join([c if c in self.allowed_characters else unidecode.unidecode(c) for c in path])
@@ -119,7 +120,7 @@ class OutputPathGenerator(PathGenerator):
 
         return output_as_folder
 
-    def get_path_no_ext(self, file):
+    def get_path_no_ext(self, file: str):
         res, _ = os.path.splitext(os.path.basename(file))
         res = os.path.join(os.path.dirname(file), res)
         return res
@@ -141,7 +142,7 @@ class OutputPathGenerator(PathGenerator):
         return self.last["upscale_path"]
 
     @cache
-    def possible_paths(self, generate=True):
+    def possible_paths(self, generate: bool = True):
         paths = set()
         if generate:
             tmp = OutputPathGenerator(self.file, self.input, self.output, self.suffix, self.compress, not self.rename, self.remove_root_folders)

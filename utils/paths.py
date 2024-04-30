@@ -1,7 +1,7 @@
 import os
 import subprocess
 
-def get_program_path(program_name: str) -> str:
+def get_program_path(program_name: str) -> str|None:
     """
     Get the path to the program with the given name
 

@@ -69,7 +69,7 @@ def compress_seven_zip(folder: str, output_path: str, seven_zip_path: str, progr
         raise Exception(f"Failed to compress {folder} to {output_path}")
 
 
-def extract(file: str, output_path: str = None, progress=Progress(transient=True)) -> str:
+def extract(file: str, output_path: str|None = None, progress=Progress(transient=True)) -> str:
     """
     Extract a zip file to a folder
 

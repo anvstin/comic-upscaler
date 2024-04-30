@@ -1,25 +1,32 @@
 import argparse
 import glob
+import multiprocessing.managers
 import os
-import re
 import subprocess
 import sys
 import multiprocessing
 import time
+import natsort
 
-from rich.progress import track, Progress
-# from rich import print
+from rich.progress import Progress
 from rich.console import Console
 
-import natsort
 from paths import OutputPathGenerator
 from global_config import *
-from utils.files import get_closest_dir, rm_tree, prune_empty_folders
+from utils.files import get_closest_dir, rm_tree, prune_empty_folders, get_comics_files
 from utils.compression import compress, extract
+from utils.terminal import terminal, print_sleep
+from utils.files import sync_files
 
 console = Console()
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
+    """
+    Parse the program arguments
+
+    Returns:
+        argparse.Namespace: The parsed arguments
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument('input', help='Input file or folder')
     parser.add_argument('output', help='Output file or folder', default=None, nargs='?')
@@ -59,24 +66,27 @@ def parse_args():
 
     return parsed_args
 
-def get_cbz_files(input_path, ignore_upscaled=False):
-    res = []
-    if os.path.isdir(input_path):
-        for file in glob.glob(input_path + '/**', recursive=True):
-            if ignore_upscaled and re.match(r'.*_x[0-9]+\.cbz', file):
-                print(f"Ignoring {file}")
-                continue
+def upscale(input_path: str, output_path: str, scale: int, format: str|None = None,
+            width: int=0, tiles: int=1024, wait: bool=True, tile_pad: int=50,
+            fp32: bool=False) -> subprocess.Popen:
+    """
+    Upscale the images in the input folder and save them in the output folder
 
-            if file.endswith('.cbz') or file.endswith('.zip'):
-                # res.append(input_path + '/' + file)
-                res.append(file) # glob already returns the full path
-    elif input_path.endswith('.cbz') or input_path.endswith('.zip'):
-        res.append(input_path)
+    Args:
+        input_path (str): The path to the input folder
+        output_path (str): The path to the output folder
+        scale (int): The scale to upscale the images by
+        format (str, optional): The format of the output images. Defaults to None.
+        width (int, optional): The width to fit the images to. Defaults to 0.
+        tiles (int, optional): The number of tiles to split the images into. Defaults to 1024.
+        wait (bool, optional): Wait for the process to finish. Defaults to True.
+        tile_pad (int, optional): The padding of the tiles. Defaults to 50.
+        fp32 (bool, optional): Use fp32 instead of fp16. Defaults to False.
 
-    return res
+    Raises:
+        Exception: Upscaling failed
+    """
 
-
-def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wait=True, tile_pad=50, fp32=False):
     args = ["python", UPSCALE_SCRIPT_PATH, '-i', input_path, '-o', output_path, '-n', MODEL_NAME, '-s', f"{scale}", "-t", f"{tiles}", "--tile_pad", f"{tile_pad}", "--width", f"{width}"]
     # args = ["python", executable_path, '-i', input_path, '-o', output_path, '-n', model_name, '-s', str(scale), "-t", f"{tiles}", "--tile_pad", "10", "--width", str(width), "--fp32"]
     if fp32:
@@ -104,36 +114,26 @@ def upscale(input_path, output_path, scale, format=None, width=0, tiles=1024, wa
 
     return ret
 
-def sync_files(args, file_mapping: dict):
-    # Remove files that have been upscaled but not in the input folder anymore
-    for f in track(file_mapping.keys(), description="Removing upscaled files...", transient=True):
-        if not os.path.exists(f):
-            print(f"Removing (comic) {f}")
-            try:
-                os.remove(file_mapping[f])
-                file_mapping.pop(f)
-            except:
-                print(f"    <<< Error removing {file_mapping[f]} >>>")
-
-    wanted_outputs = {x.lower() for x in file_mapping.values()}
-
-    # Remove other files and folders
-    for root, dirs, files in track(os.walk(args.output, topdown=False), description="Removing other files...", transient=True):
-        for name in files:
-            file = os.path.join(root, name)
-            if file.lower() not in wanted_outputs:
-                print(f"Removing (other) {file}")
-                try:
-                    os.remove(file)
-                except:
-                    print(f"    <<< Error removing {file} >>>")
 
 
-def main(args, params, file_mapping: dict):
+
+def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict) -> int:
+    """
+    Main function to process the comics files
+
+    Args:
+        args (argparse.Namespace): The arguments
+        params (multiprocessing.managers.Namespace): The shared parameters (end_after_upscaling, need_pruning, file_mapping)
+        file_mapping (dict): The mapping of input files to output files
+
+    Returns:
+        int: The number of files processed
+    """
+
     seen_files = set(file_mapping.keys())
 
     # Get the list of .cbz files
-    found_paths = get_cbz_files(args.input, ignore_upscaled=True)
+    found_paths = get_comics_files(args.input, ignore_upscaled=True)
 
     # Sort the files by name
     found_paths = natsort.natsorted(found_paths)
@@ -160,7 +160,7 @@ def main(args, params, file_mapping: dict):
                 paths[i] = None
                 continue
 
-            gen = OutputPathGenerator.from_args(args, file)
+            gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file) # type: ignore
             if gen.exists():
                 print(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
                 paths[i] = None
@@ -213,25 +213,16 @@ def main(args, params, file_mapping: dict):
 
     return len([path for path in paths if path is not None])
 
-def print_sleep(duration: int, step: int = 0.5) -> None:
+
+def start_processing(args: argparse.Namespace, params: multiprocessing.managers.Namespace) -> None:
     """
-    Print a sleep with a progress bar
+    Start the processing of the comics files
 
     Args:
-        duration (int): The duration of the sleep
-        step (int, optional): The step of the progress bar. Defaults to 0.5.
+        args (argparse.Namespace): The arguments
+        params (multiprocessing.managers.Namespace): The shared parameters (end_after_upscaling, need_pruning, file_mapping)
     """
-    # Use rich to print sleep
-    with Progress(speed_estimate_period=2, transient=True) as progress:
-        task = progress.add_task("Sleeping...", total=duration)
-        nb_iter = int(duration / step)
-        for i in range(nb_iter):
-            progress.update(task, advance=step)
-            time.sleep(step)
-        time.sleep(duration % step)
-        progress.stop()
 
-def start_processing(args, params):
     file_mapping: dict = params.file_mapping
     count = -100
     while True:
@@ -258,18 +249,6 @@ def start_processing(args, params):
         else:
             print("\033[KChecking for new files...", end='\r')
 
-def terminal(args, params):
-    sys.stdin = open(0)
-    while True:
-        cmd = input()
-        if cmd == "sync":
-            sync_files(args, params.file_mapping)
-            params.need_pruning = (True)
-        elif cmd == "q":
-            params.end_after_upscaling = (True)
-            print("<<< User pressed q, no more files will be processed after the current one >>>")
-        else:
-            print("Unknown command")
 
 if __name__ == '__main__':
     manager = multiprocessing.Manager()
