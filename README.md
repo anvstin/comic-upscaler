@@ -19,6 +19,9 @@ Use conda to install the requirements:
 
 ```bash
 conda env create -f environment.yml
+cd Real-ESRGAN
+conda activate upscale
+python setup.py build
 ```
 
 ## Usage
