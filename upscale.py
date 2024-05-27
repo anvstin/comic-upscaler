@@ -13,7 +13,7 @@ from rich.console import Console
 
 from paths import OutputPathGenerator
 from global_config import *
-from utils.files import get_closest_dir, rm_tree, prune_empty_folders, get_comics_files
+from utils.files import get_closest_dir, rm_tree, prune_empty_folders, get_sorted_comic_files
 from utils.compression import compress, extract
 from utils.terminal import terminal, print_sleep
 from utils.files import sync_files
@@ -132,42 +132,34 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
 
     seen_files = set(file_mapping.keys())
 
-    # Get the list of .cbz files
-    found_paths = get_comics_files(args.input, ignore_upscaled=True)
-
-    # Sort the files by name
-    found_paths = natsort.natsorted(found_paths)
-
-    paths = [p for p in found_paths if p not in seen_files]
-    if len(paths) == 0:
-        return 0
-    print(f"Found {len(paths)} files")
+    processed_paths = [] # Comics files found
     input_directory = get_closest_dir(args.input)
 
     # Process each .cbz file
     with Progress() as progress:
-        progress_bar = progress.add_task("Processing files...", total=len(paths))
-        for i, file in enumerate(paths):
-            progress.update(progress_bar, advance=1)
+        # progress_bar = progress.add_task("Processing files...", total=len(paths))
+        progress_bar = progress.add_task("Processing files...", total=None)
+        for i, file in enumerate(get_sorted_comic_files(args.input, ignore_upscaled=True)):
+            progress.update(progress_bar, advance=1, visible=True)
             if params.end_after_upscaling:
                 print("<<< Exiting... >>>")
                 exit()
-            if file in seen_files:
-                continue
 
-            if not os.path.exists(file):
-                print(f"Skipping {os.path.relpath(file, args.input)} (does not exist)")
-                paths[i] = None
+            if file in seen_files:
                 continue
 
             gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file) # type: ignore
             if gen.exists():
                 print(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
-                paths[i] = None
                 file_mapping[file] = gen.output_path
                 continue
-            print(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(paths)})")
+
+            # Start processing the file
+            processed_paths.append(file)
+
+            print(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(processed_paths)})")
             print(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
+            progress.update(progress_bar, visible=False)
 
             print(f"    Extracting to {os.path.basename(gen.extract_path)}")
             os.makedirs(gen.extract_path, exist_ok=True)
@@ -180,7 +172,6 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
             print(f"    Upscaling to {os.path.basename(gen.upscale_path)} ({len(os.listdir(gen.extract_path))} images)")
             os.makedirs(gen.upscale_path, exist_ok=True)
             # Hide progress bar temporarily
-            progress.update(progress_bar, visible=False)
             try:
                 upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles, fp32=args.fp32)
                 progress.update(progress_bar, visible=False)
@@ -203,15 +194,13 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
                 print(f"    <<< Error writing {os.path.basename(file)} >>>")
                 continue
 
-            file_mapping[file] = gen.output_path
-            print(f"Done {os.path.basename(file)} ({i + 1}/{len(paths)})")
+            file_mapping[file] = gen.output_path # Update the file mapping (seen_files)
+            print(f"Done {os.path.basename(file)} ({i + 1}/{len(processed_paths)})")
+
+        progress.update(progress_bar, visible=False)
         progress.stop()
 
-    # if all paths are in seen_files, return 0
-    if all([path in seen_files for path in paths if path is not None]):
-        return 0
-
-    return len([path for path in paths if path is not None])
+    return len(processed_paths)
 
 
 def start_processing(args: argparse.Namespace, params: multiprocessing.managers.Namespace) -> None:

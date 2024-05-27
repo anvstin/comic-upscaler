@@ -75,8 +75,6 @@ class OutputPathGenerator(PathGenerator):
 
         self.possible_paths_dict.update({self.output_path_compress, self.output_path_folder})
 
-
-
     def get_input_directory(self):
         input_directory = os.path.abspath(self.input)
         if not os.path.isdir(self.input):
@@ -90,7 +88,7 @@ class OutputPathGenerator(PathGenerator):
         # Remove double spaces
         path = re.sub(r' +', ' ', path)
         # Strip spaces for each folder
-        path = os.path.sep.join([c.strip() for c in path.split(os.path.sep)])
+        path = os.path.sep.join(c.strip() for c in path.split(os.path.sep))
         path = path.strip()
         # Remove all characters that are not in the allowed characters
         return "".join([c for c in path if c in self.allowed_characters])
@@ -155,5 +153,5 @@ class OutputPathGenerator(PathGenerator):
 
     def exists(self):
         to_check = self.possible_paths()
-        return any([os.path.exists(path) for path in to_check])
+        return any(os.path.exists(path) for path in to_check)
 

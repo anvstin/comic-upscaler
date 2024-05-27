@@ -4,6 +4,9 @@ import glob
 from rich.progress import track
 import argparse
 import re
+import queue
+import natsort
+from typing import Generator
 
 def get_size(path: str) -> int:
     """
@@ -69,33 +72,6 @@ def get_closest_dir(input_path: str) -> str:
     return input_directory
 
 
-def get_comics_files(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip')) -> list:
-    """
-    Get all the comic files in the input path recursively
-
-    Args:
-        input_path (str): The path to the folder or file
-        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
-        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
-
-    Returns:
-        list: A list of comic files (cbz or zip)
-    """
-
-    res = []
-    if os.path.isdir(input_path):
-        for file in glob.glob(input_path + '/**', recursive=True):
-            if ignore_upscaled and re.match(r'.*_x[0-9]+\.cbz', file):
-                print(f"Ignoring {file}")
-                continue
-
-            if any(file.endswith(ext) for ext in extension):
-                res.append(file) # glob already returns the full path
-    elif any(input_path.endswith(ext) for ext in extension):
-        res.append(input_path)
-
-    return res
-
 def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     """
     Sync the output folder with the input folder.
@@ -106,8 +82,6 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
         args (argparse.Namespace): The arguments
         file_mapping (dict): The file mapping
     """
-
-
     # Remove files that have been upscaled but not in the input folder anymore
     for f in track(file_mapping.keys(), description="Removing upscaled files...", transient=True):
         if not os.path.exists(f):
@@ -130,3 +104,34 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
                     os.remove(file)
                 except:
                     print(f"    <<< Error removing {file} >>>")
+
+
+def get_sorted_comic_files(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip')) -> Generator[str, None, None]:
+    """
+    Get all the comic files in the input path recursively and sort them
+
+    Args:
+        input_path (str): The path to the folder or file
+        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
+        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
+
+    Yields:
+        Generator[str, None, None]: A generator of comic files (cbz or zip)
+    """
+    to_process = queue.LifoQueue()
+    to_process.put(input_path)
+    while not to_process.empty():
+        current_path = to_process.get()
+
+        if os.path.isdir(current_path):
+            # Add all files in the folder to the queue (reverse them to be processed in order)
+            for file in natsort.natsorted(os.listdir(current_path), reverse=True):
+                to_process.put(os.path.join(current_path, file))
+        else:
+            if ignore_upscaled and re.match(r'.*_x[0-9]+\.cbz', current_path):
+                print(f"Ignoring {current_path}")
+                continue
+
+            if any(current_path.endswith(ext) for ext in extension):
+                yield current_path
+
