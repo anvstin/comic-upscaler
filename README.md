@@ -42,7 +42,7 @@ python3 upscale.py --help
 
 ## Authors
 
-- [**Aurélien Visentin**](https://github.com/anvstin)
+- [**anvstin**](https://github.com/anvstin)
 
 ## License
 
