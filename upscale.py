@@ -32,7 +32,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument('output', help='Output file or folder', default=None, nargs='?')
     # parser.add_argument('-d', '--divide', type=int, default=2, help='Size to divide the images by')
     parser.add_argument('-d', '--daemon', action='store_true', help='Run as a daemon')
-    parser.add_argument('-f', '--format', default="jpg", help='Output images format')
+    parser.add_argument('-f', '--format', default="webp", help='Output images format')
     parser.add_argument('-s', '--scale', type=int, default=4, help='Scale the images by')
     parser.add_argument('-w', '--width', type=int, default=0, help='Fit the images to the width')
     parser.add_argument('-t', '--tiles', type=int, default=1024, help='Split the images into tiles')
