@@ -7,7 +7,7 @@ from utils.files import get_size, rm_tree
 from utils.paths import get_program_path
 from global_config import SEVEN_ZIP_PATH
 
-def compress(folder: str, output_path: str) -> None:
+def compress(folder: str, output_path: str, progress: Progress|None=None) -> None:
     """
     Compress the folder to a cbz file and select the best method
 
@@ -22,12 +22,12 @@ def compress(folder: str, output_path: str) -> None:
         seven_zip_path = get_program_path("7z")
 
     if seven_zip_path is None:
-        compress_integrated(folder, output_path)
+        compress_integrated(folder, output_path, progress)
     else:
-        compress_seven_zip(folder, output_path, seven_zip_path)
+        compress_seven_zip(folder, output_path, seven_zip_path, progress)
 
 
-def compress_integrated(folder: str, output_path: str, progress=Progress(transient=True)) -> None:
+def compress_integrated(folder: str, output_path: str, progress: Progress|None=None) -> None:
     """
     Compress the folder to a cbz file using standard python libraries
 
@@ -36,21 +36,22 @@ def compress_integrated(folder: str, output_path: str, progress=Progress(transie
         output_path (str): The path to the output file
         progress (Progress): The progress bar to use
     """
-
     # Compress the folder to a cbz file using standard python libraries
     # Integraded version seems to have trouble with network drives, use 7zip in those cases
-    task_id = progress.add_task(f"    Compressing {folder}...", total=get_size(folder))
+    if progress:
+        task_id = progress.add_task(f"    Compressing {folder}...", total=get_size(folder))
 
     with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zip_ref:
         for file in glob.glob(folder + '/**', recursive=True):
             if os.path.isdir(file):
                 continue
             zip_ref.write(file, os.path.relpath(file, folder))
-            progress.update(task_id, advance=os.path.getsize(file))
+            if progress:
+                progress.update(task_id, advance=os.path.getsize(file))
+    if progress:
+        progress.remove_task(task_id)
 
-    progress.remove_task(task_id)
-
-def compress_seven_zip(folder: str, output_path: str, seven_zip_path: str, progress=Progress(transient=True)) -> None:
+def compress_seven_zip(folder: str, output_path: str, seven_zip_path: str, progress: Progress|None=None) -> None:
     """
     Compress a folder to a cbz file using 7z.exe
 
@@ -61,10 +62,11 @@ def compress_seven_zip(folder: str, output_path: str, seven_zip_path: str, progr
     """
     if not os.path.exists(seven_zip_path):
         raise Exception("7z.exe not found. Please install 7zip and add it to your PATH")
-
-    task_id = progress.add_task(f"    Compressing {folder}...", total=None)
+    if progress:
+        task_id = progress.add_task(f"    Compressing {folder}...", total=None)
     ret = subprocess.run([seven_zip_path, "-tzip", 'a', output_path, folder + '/*'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    progress.remove_task(task_id)
+    if progress:
+        progress.remove_task(task_id)
     if ret.returncode != 0:
         raise Exception(f"Failed to compress {folder} to {output_path}")
 

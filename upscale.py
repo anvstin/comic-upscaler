@@ -136,11 +136,10 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
     input_directory = get_closest_dir(args.input)
 
     # Process each .cbz file
-    with Progress() as progress:
+    with Progress(transient=True) as progress:
         # progress_bar = progress.add_task("Processing files...", total=len(paths))
-        progress_bar = progress.add_task("Processing files...", total=None)
+        progress_bar = progress.add_task("Processing files...", total=None, visible=False)
         for i, file in enumerate(get_sorted_comic_files(args.input, ignore_upscaled=True)):
-            progress.update(progress_bar, advance=1, visible=True)
             if params.end_after_upscaling:
                 print("<<< Exiting... >>>")
                 exit()
@@ -148,6 +147,7 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
             if file in seen_files:
                 continue
 
+            progress.update(progress_bar, advance=1, visible=True)
             gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file) # type: ignore
             if gen.exists():
                 print(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
@@ -159,7 +159,7 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
 
             print(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(processed_paths)})")
             print(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
-            progress.update(progress_bar, visible=False)
+            # progress.update(progress_bar, visible=False)
 
             print(f"    Extracting to {os.path.basename(gen.extract_path)}")
             os.makedirs(gen.extract_path, exist_ok=True)
@@ -173,8 +173,9 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
             os.makedirs(gen.upscale_path, exist_ok=True)
             # Hide progress bar temporarily
             try:
-                upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles, fp32=args.fp32)
                 progress.update(progress_bar, visible=False)
+                upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles, fp32=args.fp32)
+                progress.update(progress_bar, visible=True)
                 rm_tree(gen.extract_path)
             except:
                 print(f"    <<< Error upscaling {os.path.basename(file)} >>>")
@@ -186,7 +187,7 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
             print(f"    Writing final images to {gen.output_path}")
             try:
                 if args.compress:
-                    compress(gen.upscale_path, gen.output_path)
+                    compress(gen.upscale_path, gen.output_path, progress=progress)
                     rm_tree(gen.upscale_path)
                 else:
                     os.rename(gen.upscale_path, gen.output_path)
@@ -197,7 +198,7 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
             file_mapping[file] = gen.output_path # Update the file mapping (seen_files)
             print(f"Done {os.path.basename(file)} ({i + 1}/{len(processed_paths)})")
 
-        progress.update(progress_bar, visible=False)
+        progress.remove_task(progress_bar)
         progress.stop()
 
     return len(processed_paths)
