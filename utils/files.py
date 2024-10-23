@@ -85,7 +85,7 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     # Remove files that have been upscaled but not in the input folder anymore
     for f in track(file_mapping.keys(), description="Removing upscaled files...", transient=True):
         if not os.path.exists(f):
-            print(f"Removing (comic) {f}")
+            print(f"Removing (comic) {file_mapping[f]}")
             try:
                 os.remove(file_mapping[f])
                 file_mapping.pop(f)
