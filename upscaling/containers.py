@@ -53,6 +53,7 @@ class ImageContainer:
         self.interface.close()
 
     def iterate_images(self, split_width: int = 0, split_height: int = 0) -> Iterator[tuple[str, np.ndarray]]:
+        self.interface.open()
         for data in self.interface.iterate():
             log.debug(f"found subfile {data.filepath}")
             if data.type == IoData.Types.IMAGE:
@@ -62,6 +63,7 @@ class ImageContainer:
                 decoded = cv2.imdecode(byte_data, cv2.IMREAD_COLOR)
                 yield data.filepath, decoded
                 del byte_data, decoded
+        self.interface.close()
 
     def iterate_images_async(self, split_width: int = 0, split_height: int = 0, cache_count: int = 4) -> Iterator[
         tuple[str, np.ndarray]]:
@@ -78,6 +80,7 @@ class ImageContainer:
                 return (data, decoded)
             return (data, None)
 
+        self.interface.open()
         with ThreadPoolExecutor() as executor:
             for i in range(cache_count):
                 threads[i] = executor.submit(lambda: read_val(values[i]))
@@ -91,11 +94,14 @@ class ImageContainer:
                     log.debug(f"Done reading")
                     yield data.filepath, decoded
                     del decoded
+        self.interface.close()
 
     def iterate_non_images(self) -> Iterator[IoData]:
+        self.interface.open()
         for data in self.interface.iterate():
             if data.type != IoData.Types.IMAGE:
                 yield data
+        self.interface.close()
 
 
 class FileInterface:
@@ -182,8 +188,9 @@ class DirInterface(FileInterface):
     def iterate(self) -> Iterator[IoData]:
         for file in self.file.glob("**"):
             if file.is_file():
-                self._sub_io_list.append(open(file, "rb"))
-                yield next(self.one_file_iterator(file, self._sub_io_list[-1]))
+                relative_path = file.relative_to(self.file)
+                self._sub_io_list.append(open(relative_path, "rb"))
+                yield next(self.one_file_iterator(relative_path, self._sub_io_list[-1]))
 
     def open(self):
         if self.file.is_file():
@@ -204,12 +211,14 @@ class ZipInterface(FileInterface):
         self.threads: list[threading.Thread] = []
 
     def open(self):
+        log.debug(f"Opening {self.file}")
         if self._io is not None:
             raise RuntimeError(self.ALREADY_CLOSED_MSG)
         self.file.parent.mkdir(parents=True, exist_ok=True)
         self._io = ZipFile(self.file, "w" if self.write else "r")
 
     def close(self):
+        log.debug(f"Closing {self.file}")
         if self._io is None:
             raise RuntimeError(self.ALREADY_OPENED_MSG)
         for t in self.threads:
@@ -222,7 +231,7 @@ class ZipInterface(FileInterface):
         path = Path(relative_path)
         zf: ZipFile = self.get_write()  # type: ignore
 
-        parent = path.parent.as_posix()
+        parent = path.parent.absolute().as_posix()
         if parent != "./" and (not parent in zf.namelist() or not zf.getinfo(parent).is_dir()):
             zf.mkdir(parent)
         self.threads.append(threading.Thread(target=zf.writestr, args=(path.as_posix(), data)))

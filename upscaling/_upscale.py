@@ -1,4 +1,5 @@
 import logging
+import math
 import time
 from pathlib import Path
 from typing import Callable, Iterator
@@ -8,7 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-import math
+
 from upscaling.containers import FileInterface, ImageContainer
 from . import UpscaleData, ImageConverter
 
@@ -38,7 +39,7 @@ def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[str, Tens
 
             res = path, model(img)
             del img
-            log.info(f"Done upscaling")
+            log.debug(f"Done upscaling")
             yield res
 
 
@@ -55,29 +56,32 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
     for path, img in upscale_images(upscale_data, tensor_iterator):
         # Save the image to file
         output_path = (Path("./") / Path(path).name).with_suffix("." + upscale_data.config.output_format)
-        log.info(f"Squeezing image ({img.shape})")
+        log.debug(f"Squeezing image ({img.shape})")
         img_np: np.ndarray = (img.squeeze(0).clip(0, 1).permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
         del img
         torch.cuda.empty_cache()
-        resized = cv2.resize(img_np, dsize=(upscale_data.config.output_max_width, int(np.round(img_np.shape[0] * upscale_data.config.output_max_width / img_np.shape[1]))),
+        resized = cv2.resize(img_np, dsize=(upscale_data.config.output_max_width, int(np.round(
+            img_np.shape[0] * upscale_data.config.output_max_width / img_np.shape[1]))),
                              interpolation=cv2.INTER_LANCZOS4)
         del img_np
-        log.info(f"Converting image output to PNG {path} ({resized.shape})")
+        log.debug(f"Converting image output to {output_path.suffix} {path} ({resized.shape})")
         res = ImageConverter(resized).to(output_path.suffix)
         del resized
 
-        log.info(f"Done converting")
-        output_suffixes = (output_path.suffix,)
+        log.debug(f"Done converting")
+        new_output_paths = (output_path,)
         if len(res) > 1:
-            digits = int(math.log10(len(res)))+1
-            output_suffixes = (f".{i:0{digits}}{output_path.suffix}" for i in range(len(res)))
-        for i, suffix in enumerate(output_suffixes):
-            new_output_path = output_path.with_suffix(suffix)
-            log.info(f"Saving image n°{i} to {new_output_path}")
-            output_interface.add_file(res[i].tobytes(), new_output_path)
-        del res
+            digits = int(math.log10(len(res))) + 1
+            new_output_paths = (
+                output_path.with_suffix(f".{i:0{digits}}{output_path.suffix}")
+                for i in range(len(res))
+            )
 
-        log.info(f"Done saving images")
+        log.info(f"Saving to {tuple(i.as_posix() for i in new_output_paths)}")
+        for img_data, img_path in zip(res, new_output_paths):
+            output_interface.add_file(img_data, img_path)
+        del res
+        log.debug(f"Done saving images")
 
 
 times = []

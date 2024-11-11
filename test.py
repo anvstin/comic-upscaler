@@ -7,8 +7,7 @@ from upscaling.upscale import upscale_file
 from upscaling.upscaler_config import ModelDtypes
 
 log = logging.getLogger()
-logging.basicConfig(level=logging.DEBUG, format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
-
+logging.basicConfig(level=logging.INFO, format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
 
 import argparse
 import multiprocessing.managers
@@ -125,9 +124,10 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
                 upscale_file(model_data, image_container, output_interface)
                 log.info(f"Renaming {tmp_out.name} to {gen.output_path}")
                 tmp_out.rename(gen.output_path)
-            except:
+            except Exception as e:
                 log.error(f"    <<< Error upscaling {os.path.basename(file)} >>>")
-                raise RuntimeError("EOEOEOE")
+                log.error(f"Exception: {e}")
+                # raise RuntimeError("EOEOEOE")
                 continue
 
             file_mapping[file] = gen.output_path # Update the file mapping (seen_files)
