@@ -46,10 +46,11 @@ class ImageConverter:
     def to_webp(self, quality: int = 90) -> list[np.ndarray]:
         if len(self.images) == 0:
             raise ValueError("No images to convert")
-        log.warning(f"The current WEBP implementation only supports one image for now, using first image")
+        if len(self.images) > 1:
+            log.warning(f"The current WEBP implementation only supports one image for now, using first image")
         return _encode_split(".webp", self.images[0], [cv2.IMWRITE_WEBP_QUALITY, quality], MAX_WEBP_SIZE)
 
-    def to_png(self, compression: int = 5) -> list[np.ndarray]:
+    def to_png(self, compression: int = 9) -> list[np.ndarray]:
         return self._encode_single_image_container("png", [cv2.IMWRITE_PNG_COMPRESSION, compression], MAX_PNG_SIZE)
 
     def to_jpeg(self, quality: int = 90) -> list[np.ndarray]:
@@ -58,7 +59,8 @@ class ImageConverter:
     def to_gif(self, quality: int = 90) -> list[np.ndarray]:
         if len(self.images) == 0:
             raise ValueError("No images to convert")
-        log.warning(f"The current GIF implementation only supports one image for now, using first image")
+        if len(self.images) > 1:
+            log.warning(f"The current GIF implementation only supports one image for now, using first image")
         return _encode_split(".webp", self.images[0], [cv2.IMWRITE_WEBP_QUALITY, quality], MAX_WEBP_SIZE)
 
     def _encode_single_image_container(self, container: str, params: list, max_size: int) -> list[np.ndarray]:

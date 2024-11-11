@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-
+import math
 from upscaling.containers import FileInterface, ImageContainer
 from . import UpscaleData, ImageConverter
 
@@ -59,7 +59,7 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         img_np: np.ndarray = (img.squeeze(0).clip(0, 1).permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
         del img
         torch.cuda.empty_cache()
-        resized = cv2.resize(img_np, dsize=(img_np.shape[1] // 2, img_np.shape[0] // 2),
+        resized = cv2.resize(img_np, dsize=(upscale_data.config.output_max_width, int(np.round(img_np.shape[0] * upscale_data.config.output_max_width / img_np.shape[1]))),
                              interpolation=cv2.INTER_LANCZOS4)
         del img_np
         log.info(f"Converting image output to PNG {path} ({resized.shape})")
@@ -69,10 +69,11 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         log.info(f"Done converting")
         output_suffixes = (output_path.suffix,)
         if len(res) > 1:
-            output_suffixes = (f".{i}{output_path.suffix}" for i in range(len(res)))
+            digits = int(math.log10(len(res)))+1
+            output_suffixes = (f".{i:0{digits}}{output_path.suffix}" for i in range(len(res)))
         for i, suffix in enumerate(output_suffixes):
             new_output_path = output_path.with_suffix(suffix)
-            log.info(f"Saving image n°{i} to {output_path}")
+            log.info(f"Saving image n°{i} to {new_output_path}")
             output_interface.add_file(res[i].tobytes(), new_output_path)
         del res
 

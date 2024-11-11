@@ -11,6 +11,8 @@ import cv2
 import natsort
 import numpy as np
 
+from utils.files import rm_tree
+
 log = logging.getLogger(__file__)
 
 
@@ -186,6 +188,8 @@ class DirInterface(FileInterface):
     def open(self):
         if self.file.is_file():
             raise IOError(f"file is not a dir: {self.file}")
+        if self.write:
+            rm_tree(str(self.file))
         self.file.mkdir(parents=True, exist_ok=True)
 
     def close(self):
@@ -202,6 +206,7 @@ class ZipInterface(FileInterface):
     def open(self):
         if self._io is not None:
             raise RuntimeError(self.ALREADY_CLOSED_MSG)
+        self.file.parent.mkdir(parents=True, exist_ok=True)
         self._io = ZipFile(self.file, "w" if self.write else "r")
 
     def close(self):

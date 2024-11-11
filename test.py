@@ -1,7 +1,7 @@
 import logging
 from pathlib import Path
 
-from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig
+from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, UpscaleData
 from upscaling.containers import ZipInterface, DirInterface
 from upscaling.upscale import upscale_file
 from upscaling.upscaler_config import ModelDtypes
@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     return parsed_args
 
 
-def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict) -> int:
+def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict, model_data: UpscaleData) -> int:
     """
     Main function to process the comics files
 
@@ -90,14 +90,6 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
     processed_paths = [] # Comics files found
     input_directory = get_closest_dir(args.input)
 
-    model_data = get_realesrgan_model(
-        UpscaleConfig(
-            model_name="R-ESRGAN AnimeVideo",
-            device="cuda",
-            model_dtype=ModelDtypes.HALF
-        )
-    )
-    model_data.download_model()
 
     # Process each .cbz file
     with Progress(transient=True) as progress:
@@ -127,7 +119,7 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
             # os.makedirs(gen.output_path_folder)
             image_container = ImageContainer(container_path=Path(file))
             tmp_out = Path(gen.output_path + ".tmp")
-            output_interface = DirInterface(tmp_out, write=True)
+            output_interface = ZipInterface(tmp_out, write=True)
 
             try:
                 upscale_file(model_data, image_container, output_interface)
@@ -158,11 +150,21 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
 
     file_mapping: dict = params.file_mapping
     count = -100
+
+    model_data = get_realesrgan_model(
+        UpscaleConfig(
+            model_name="R-ESRGAN AnimeVideo",
+            device="cuda",
+            model_dtype=ModelDtypes.HALF
+        )
+    )
+    model_data.download_model()
+
     while True:
         count = -1
         while count != 0:
             print("\033[K", end='\r')
-            count = main(args, params, file_mapping)
+            count = main(args, params, file_mapping, model_data)
 
         if args.sync:
             print("Syncing...", end='\r')
