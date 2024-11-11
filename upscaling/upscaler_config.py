@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 from enum import Enum
 
+
 class ModelDtypes(Enum):
     HALF = 'half'
     FLOAT = 'float'
+
     def get(self):
         import torch
         types = {
@@ -11,6 +13,7 @@ class ModelDtypes(Enum):
             'float': torch.float
         }
         return types[self.value]
+
 
 @dataclass
 class UpscaleConfig:
@@ -27,5 +30,3 @@ class UpscaleConfig:
     # chunk_enabled: bool = False
     # chunk_size: int = 4000
     # chunk_padding: int = 100
-
-

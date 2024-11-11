@@ -1,14 +1,12 @@
-
-
+import logging
 import os
 from pathlib import Path
-import logging
 
 from upscaling import UpscaleConfig
 from upscaling.upscaler_config import ModelDtypes
 
-
 log = logging.getLogger(__name__)
+
 
 class UpscaleData:
     log = logging.getLogger("UpscalerData")
@@ -25,13 +23,14 @@ class UpscaleData:
 
         self.real_path = Path(self.path)
         if self.is_url():
-            self.real_path = Path(download_path) if download_path else Path.cwd() / "models" / f"{self.name}-x{self.scale}{file_extension}"
+            self.real_path = Path(
+                download_path) if download_path else Path.cwd() / "models" / f"{self.name}-x{self.scale}{file_extension}"
 
     def __str__(self):
         return f"{self.name} x{self.scale} ({self.path})"
 
     def __hash__(self) -> int:
-        return  hash(self.__str__())
+        return hash(self.__str__())
 
     def is_url(self) -> bool:
         return self.path.startswith("https://") or self.path.startswith("http://")
@@ -46,8 +45,6 @@ class UpscaleData:
         return Path(self.path)
 
     def load_model(self):
-        if self.model is not None:
-            return
         self.log.debug(f"load_model {self.name}")
 
         if not os.path.isfile(self.real_path):
@@ -70,7 +67,8 @@ class UpscaleData:
         self.model = None
 
     def get_model(self):
-        self.load_model()
+        if self.model is None:
+            self.load_model()
         return self.model
 
     def download_model(self) -> Path:
@@ -146,6 +144,7 @@ def get_realesrgan_model_from_name(model_name: str) -> UpscaleData:
         raise RuntimeError(f"{model_name} is not a unique RealESRGAN model")
 
     return compatible_models[0]
+
 
 def get_realesrgan_model(upscale_config: UpscaleConfig) -> UpscaleData:
     data = get_realesrgan_model_from_name(upscale_config.model_name)

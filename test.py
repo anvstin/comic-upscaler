@@ -5,7 +5,7 @@ from pathlib import Path
 from torch.cuda import device
 
 from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig
-from upscaling.containers import ZipInterface
+from upscaling.containers import ZipInterface, DirInterface
 from upscaling.upscale import upscale_file
 from upscaling.upscaler_config import ModelDtypes
 
@@ -128,10 +128,10 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
 
             log.info(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(processed_paths)})")
             log.info(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
-            os.makedirs(gen.output_path_folder)
+            # os.makedirs(gen.output_path_folder)
             image_container = ImageContainer(container_path=Path(file))
             tmp_out = Path(gen.output_path + ".tmp")
-            output_interface = ZipInterface(tmp_out, write=True)
+            output_interface = DirInterface(tmp_out, write=True)
 
             try:
                 upscale_file(model_data, image_container, output_interface)
