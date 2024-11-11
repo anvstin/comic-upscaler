@@ -1,19 +1,19 @@
 from upscaling.containers import FileInterface
-from . import UpscalerData, ImageContainer
+from . import UpscaleData, ImageContainer
 from pathlib import Path
 import multiprocessing as mp
 
-def upscale_func(upscaler_data: UpscalerData, data: ImageContainer, outputInterface: FileInterface):
+def upscale_func(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface):
     from ._upscale import upscale_container
     data.open()
-    outputInterface.open()
-    upscale_container(upscaler_data, data, outputInterface)
+    output_interface.open()
+    upscale_container(upscale_data, data, output_interface)
     data.close()
-    outputInterface.close()
+    output_interface.close()
 
-def upscale_file(upscaler_data: UpscalerData, data: ImageContainer, outputInterface: FileInterface):
+def upscale_file(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface):
     # Upscale the image in another process
-    upscale_func(upscaler_data, data, outputInterface)
+    upscale_func(upscale_data, data, output_interface)
     # p = mp.Process(target=upscale_func, args=(upscaler_data, data, outputInterface))
     # p.start()
     # p.join()

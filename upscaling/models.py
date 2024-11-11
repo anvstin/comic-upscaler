@@ -4,15 +4,21 @@ import os
 from pathlib import Path
 import logging
 
-# logger = logging.getLogger(__name__)
+from upscaling import UpscaleConfig
+from upscaling.upscaler_config import ModelDtypes
 
-class UpscalerData:
-    logger = logging.getLogger("UpscalerData")
 
-    def __init__(self, name: str, path: str, scale: int, download_path: str | None = None):
+log = logging.getLogger(__name__)
+
+class UpscaleData:
+    log = logging.getLogger("UpscalerData")
+
+    def __init__(self, name: str, path: str, scale: int, download_path: str | None = None, config=UpscaleConfig()):
         self.name = name
         self.path = path
         self.scale = scale
+        self.config = config
+        self.model = None
 
         file_extension = Path(self.path).suffix
         assert file_extension == ".pth" or file_extension == ".safetensor", f"{self.path} must be a .pth or .safetensor file"
@@ -31,7 +37,7 @@ class UpscalerData:
         return self.path.startswith("https://") or self.path.startswith("http://")
 
     def fetch_model(self) -> Path:
-        self.logger.debug("fetch_model {self}")
+        self.log.debug("fetch_model {self}")
         if self.is_url():
             return self.download_model()
         if not self.real_path.is_file():
@@ -40,9 +46,13 @@ class UpscalerData:
         return Path(self.path)
 
     def load_model(self):
+        if self.model is not None:
+            return
+        self.log.debug(f"load_model {self.name}")
+
         if not os.path.isfile(self.real_path):
             raise RuntimeError(f"Could not find model {self.name} at {self.real_path}")
-        self.logger.debug(f"load_model {self.name}")
+        self.log.debug(f"load_model {self.name}")
         from spandrel import ImageModelDescriptor, ModelLoader
 
         model = ModelLoader().load_from_file(self.real_path)
@@ -50,10 +60,21 @@ class UpscalerData:
         assert isinstance(model, ImageModelDescriptor), f"{model} is not an ImageModelDescriptor"
         assert model.scale == self.scale, f"{model} has a scale of {model.scale}, but expected {self.scale}"
 
-        return model
+        if self.config.model_dtype == ModelDtypes.HALF:
+            model = model.half()
+        self.model = model.eval().to(self.config.device)
+
+    def unload_model(self):
+        self.log.debug(f"unload_model {self.name}")
+        del self.model
+        self.model = None
+
+    def get_model(self):
+        self.load_model()
+        return self.model
 
     def download_model(self) -> Path:
-        self.logger.debug(f"download_model {self.name}")
+        self.log.debug(f"download_model {self.name}")
         from tqdm import tqdm
         import requests
 
@@ -66,7 +87,7 @@ class UpscalerData:
             file_size = int(r.headers.get('content-length', 0))
             block_size = 8192
             if self.real_path.is_file() and self.real_path.stat().st_size == file_size:
-                self.logger.debug(f"model already downloaded at {self.real_path} with size {file_size}")
+                self.log.debug(f"model already downloaded at {self.real_path} with size {file_size}")
                 return self.real_path
 
             with tqdm(total=file_size, unit='iB', unit_scale=True) as pbar, open(self.real_path, 'wb') as f:
@@ -77,38 +98,41 @@ class UpscalerData:
                     else:
                         f.flush()
 
-        self.logger.debug("model downloaded at {self.real_path} with size {file_size}")
+        self.log.debug("model downloaded at {self.real_path} with size {file_size}")
         return self.real_path
 
+    def configure(self, upscale_config: UpscaleConfig) -> None:
+        self.config = upscale_config
 
-def get_realesrgan_model(model_name: str) -> UpscalerData:
+
+def get_realesrgan_model_from_name(model_name: str) -> UpscaleData:
     models = (
-        UpscalerData(
+        UpscaleData(
             name="R-ESRGAN General 4xV3",
             path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-x4v3.pth",
             scale=4,
         ),
-        UpscalerData(
+        UpscaleData(
             name="R-ESRGAN General WDN 4xV3",
             path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-general-wdn-x4v3.pth",
             scale=4,
         ),
-        UpscalerData(
+        UpscaleData(
             name="R-ESRGAN AnimeVideo",
             path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesr-animevideov3.pth",
             scale=4,
         ),
-        UpscalerData(
+        UpscaleData(
             name="R-ESRGAN 4x+",
             path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
             scale=4,
         ),
-        UpscalerData(
+        UpscaleData(
             name="R-ESRGAN 4x+ Anime6B",
             path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
             scale=4,
         ),
-        UpscalerData(
+        UpscaleData(
             name="R-ESRGAN 2x+",
             path="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
             scale=2,
@@ -122,3 +146,8 @@ def get_realesrgan_model(model_name: str) -> UpscalerData:
         raise RuntimeError(f"{model_name} is not a unique RealESRGAN model")
 
     return compatible_models[0]
+
+def get_realesrgan_model(upscale_config: UpscaleConfig) -> UpscaleData:
+    data = get_realesrgan_model_from_name(upscale_config.model_name)
+    data.configure(upscale_config)
+    return data

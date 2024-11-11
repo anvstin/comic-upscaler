@@ -50,7 +50,7 @@ class ImageContainer:
         log.debug(f"closing file {self.container_path} with container {self.interface}")
         self.interface.close()
 
-    def iterate_images(self) -> Iterator[tuple[str, np.ndarray]]:
+    def iterate_images(self, split_width: int = 0, split_height: int = 0) -> Iterator[tuple[str, np.ndarray]]:
         for data in self.interface.iterate():
             log.debug(f"found subfile {data.filepath}")
             if data.type == IoData.Types.IMAGE:
@@ -61,7 +61,7 @@ class ImageContainer:
                 yield data.filepath, decoded
                 del byte_data, decoded
 
-    def iterate_images_async(self, cache_count: int) -> Iterator[tuple[str, np.ndarray]]:
+    def iterate_images_async(self, split_width: int = 0, split_height: int = 0, cache_count: int = 4) -> Iterator[tuple[str, np.ndarray]]:
         values = list(self.interface.iterate())
         threads: list[Future | None] = [None] * len(values)
 

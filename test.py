@@ -1,9 +1,13 @@
 import logging
 import logging.config
 from pathlib import Path
-from upscaling import get_realesrgan_model, ImageContainer
+
+from torch.cuda import device
+
+from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig
 from upscaling.containers import ZipInterface
 from upscaling.upscale import upscale_file
+from upscaling.upscaler_config import ModelDtypes
 
 log = logging.getLogger()
 logging.basicConfig(level=logging.DEBUG, format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
@@ -89,7 +93,14 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
 
     processed_paths = [] # Comics files found
     input_directory = get_closest_dir(args.input)
-    model_data = get_realesrgan_model("R-ESRGAN AnimeVideo")
+
+    model_data = get_realesrgan_model(
+        UpscaleConfig(
+            model_name="R-ESRGAN AnimeVideo",
+            device="cuda",
+            model_dtype=ModelDtypes.HALF
+        )
+    )
     model_data.download_model()
 
     # Process each .cbz file
@@ -98,42 +109,41 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
         progress_bar = progress.add_task("Processing files...", total=None, visible=False)
         for i, file in enumerate(get_sorted_comic_files(args.input, ignore_upscaled=True)):
             if params.end_after_upscaling:
-                print("<<< Exiting... >>>")
+                log.info("<<< Exiting... >>>")
                 exit()
 
             if file in seen_files:
                 continue
 
             progress.update(progress_bar, advance=1, visible=False)
-            gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file) # type: ignore
+            gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file) # type: ignored
 
             if gen.exists():
-                print(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
+                log.info(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
                 file_mapping[file] = gen.output_path
                 continue
 
             # Start processing the file
             processed_paths.append(file)
 
-            print(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(processed_paths)})")
-            print(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
+            log.info(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(processed_paths)})")
+            log.info(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
             os.makedirs(gen.output_path_folder)
             image_container = ImageContainer(container_path=Path(file))
             tmp_out = Path(gen.output_path + ".tmp")
-            outputInterface = ZipInterface(tmp_out, write=True)
-            upscale_file(model_data, image_container, outputInterface)
-            log.info(f"Renaming {tmp_out.name} to {gen.output_path}")
-            tmp_out.rename(gen.output_path)
+            output_interface = ZipInterface(tmp_out, write=True)
+
             try:
-                # upscale(gen.extract_path, gen.upscale_path, args.scale, args.format, width=args.width, tiles=args.tiles, fp32=args.fp32)
-                pass
+                upscale_file(model_data, image_container, output_interface)
+                log.info(f"Renaming {tmp_out.name} to {gen.output_path}")
+                tmp_out.rename(gen.output_path)
             except:
-                print(f"    <<< Error upscaling {os.path.basename(file)} >>>")
+                log.error(f"    <<< Error upscaling {os.path.basename(file)} >>>")
                 raise RuntimeError("EOEOEOE")
                 continue
 
             file_mapping[file] = gen.output_path # Update the file mapping (seen_files)
-            print(f"Done {os.path.basename(file)} ({i + 1}/{len(processed_paths)})")
+            log.info(f"Done {os.path.basename(file)} ({i + 1}/{len(processed_paths)})")
 
         progress.remove_task(progress_bar)
         progress.stop()
