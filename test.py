@@ -1,8 +1,5 @@
 import logging
-import logging.config
 from pathlib import Path
-
-from torch.cuda import device
 
 from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig
 from upscaling.containers import ZipInterface, DirInterface
@@ -22,8 +19,7 @@ from rich.progress import Progress
 from rich.console import Console
 
 from paths import OutputPathGenerator
-from global_config import *
-from utils.files import get_closest_dir, rm_tree, prune_empty_folders, get_sorted_comic_files
+from utils.files import get_closest_dir, prune_empty_folders, get_sorted_comic_files
 from utils.terminal import print_sleep
 from utils.files import sync_files
 

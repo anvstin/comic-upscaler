@@ -106,7 +106,7 @@ class FileInterface:
         self._io = None
 
     def open(self):
-        if self._io != None:
+        if self._io is not None:
             raise RuntimeError(self.ALREADY_OPENED_MSG)
 
         params = "wb" if self.write else "rb"
@@ -114,7 +114,7 @@ class FileInterface:
         return self._io
 
     def close(self):
-        if self._io == None:
+        if self._io is None:
             raise RuntimeError(self.ALREADY_CLOSED_MSG)
         self._io.close()
         self._io = None
@@ -130,7 +130,7 @@ class FileInterface:
         return self._get()
 
     def _get(self):
-        if self._io != None:
+        if self._io is not None:
             return self._io
         raise RuntimeError("Interface has not been opened")
 
@@ -200,13 +200,12 @@ class ZipInterface(FileInterface):
         self.threads: list[threading.Thread] = []
 
     def open(self):
-        if self._io != None:
+        if self._io is not None:
             raise RuntimeError(self.ALREADY_CLOSED_MSG)
-        params = "w" if self.write else "r"
-        self._io = ZipFile(self.file, params)
+        self._io = ZipFile(self.file, "w" if self.write else "r")
 
     def close(self):
-        if self._io == None:
+        if self._io is None:
             raise RuntimeError(self.ALREADY_OPENED_MSG)
         for t in self.threads:
             t.join()
