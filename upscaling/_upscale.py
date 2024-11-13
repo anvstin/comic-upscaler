@@ -49,7 +49,7 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
 
     log.info(f"Using device {device} with type {img_dtype}")
     tensor_iterator = (
-        (path, torch.tensor(d / 255.0).permute(2, 0, 1)[None].to(img_dtype).to(device))
+        (path, (torch.tensor(d, device=device) / 255).permute(2, 0, 1)[None].to(img_dtype))
         for path, d in data.iterate_images()
     )
 
@@ -57,7 +57,7 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         # Save the image to file
         output_path = (Path("./") / Path(path).name).with_suffix("." + upscale_data.config.output_format)
         log.debug(f"Squeezing image ({img.shape})")
-        img_np: np.ndarray = (img.squeeze(0).clip(0, 1).permute(1, 2, 0) * 255).to(torch.uint8).cpu().numpy()
+        img_np: np.ndarray = (img.squeeze(0).permute(1, 2, 0).clip(0, 1) * 255).to(torch.uint8).cpu().numpy()
         del img
         torch.cuda.empty_cache()
         resized = cv2.resize(img_np, dsize=(upscale_data.config.output_max_width, int(np.round(
@@ -69,13 +69,13 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         del resized
 
         log.debug(f"Done converting")
-        new_output_paths = (output_path,)
+        new_output_paths = [output_path]
         if len(res) > 1:
             digits = int(math.log10(len(res))) + 1
-            new_output_paths = (
+            new_output_paths = [
                 output_path.with_suffix(f".{i:0{digits}}{output_path.suffix}")
                 for i in range(len(res))
-            )
+            ]
 
         log.info(f"Saving to {tuple(i.as_posix() for i in new_output_paths)}")
         for img_data, img_path in zip(res, new_output_paths):

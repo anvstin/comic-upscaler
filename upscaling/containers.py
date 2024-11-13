@@ -4,6 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from queue import Queue
 from typing import IO, BinaryIO, Iterator
 from zipfile import ZipFile
 
@@ -208,34 +209,46 @@ class DirInterface(FileInterface):
 class ZipInterface(FileInterface):
     def __init__(self, file: Path, write: bool = False) -> None:
         super().__init__(file, write)
-        self.threads: list[threading.Thread] = []
+        self.queue = Queue()
+        self.thread = threading.Thread(target=self._process_queue, daemon=True)
 
     def open(self):
         log.debug(f"Opening {self.file}")
         if self._io is not None:
-            raise RuntimeError(self.ALREADY_CLOSED_MSG)
+            raise RuntimeError(self.ALREADY_OPENED_MSG)
         self.file.parent.mkdir(parents=True, exist_ok=True)
         self._io = ZipFile(self.file, "w" if self.write else "r")
+        self.thread = threading.Thread(target=self._process_queue, daemon=True)
+        self.thread.start()
 
     def close(self):
         log.debug(f"Closing {self.file}")
         if self._io is None:
-            raise RuntimeError(self.ALREADY_OPENED_MSG)
-        for t in self.threads:
-            t.join()
+            raise RuntimeError(self.ALREADY_CLOSED_MSG)
+        self.queue.empty()
+        self.queue.put(None)
+        self.thread.join()
 
         self._io.close()
         self._io = None
 
-    def add_file(self, data: bytes, relative_path: str | Path = "./") -> None:
-        path = Path(relative_path)
-        zf: ZipFile = self.get_write()  # type: ignore
+    def _process_queue(self):
+        while True:
+            item = self.queue.get(block=True)
+            if item is None:
+                break
+            data, relative_path = item
+            log.debug(f"Adding file: {relative_path} to {self.file}")
+            path = Path(relative_path)
+            zf: ZipFile = self.get_write()  # type: ignore
 
-        parent = path.parent.absolute().as_posix()
-        if parent != "./" and (not parent in zf.namelist() or not zf.getinfo(parent).is_dir()):
-            zf.mkdir(parent)
-        self.threads.append(threading.Thread(target=zf.writestr, args=(path.as_posix(), data)))
-        self.threads[-1].start()
+            parent = path.parent.as_posix()
+            if path.parent != Path("./") and (not parent in zf.namelist() or not zf.getinfo(parent).is_dir()):
+                zf.mkdir(parent)
+            zf.writestr(path.as_posix(), data)
+
+    def add_file(self, data: bytes, relative_path: str | Path = "./") -> None:
+        self.queue.put((data, relative_path))
 
     def iterate(self) -> Iterator[IoData]:
         zf: ZipFile = self.get_read()  # type: ignore
