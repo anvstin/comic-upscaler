@@ -15,14 +15,11 @@ import os
 import multiprocessing
 
 from rich.progress import Progress
-from rich.console import Console
 
 from paths import OutputPathGenerator
-from utils.files import get_closest_dir, prune_empty_folders, get_sorted_comic_files
+from utils.files import get_closest_dir, prune_empty_folders, get_sorted_comic_files, get_sorted_comic_files_parallel_thread, get_sorted_comic_files_parallel_process
 from utils.terminal import print_sleep
 from utils.files import sync_files
-
-console = Console()
 
 def parse_args() -> argparse.Namespace:
     """
@@ -70,8 +67,49 @@ def parse_args() -> argparse.Namespace:
 
     return parsed_args
 
+def _get_to_process(gen_args: dict, file_mapping: dict[str], q: multiprocessing.Queue, cache_size=100, subcache_ratio = 2):
+    seen_files = set(file_mapping.keys())
+    sub_cache_size = cache_size // subcache_ratio if subcache_ratio > 0 else 0
 
-def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict, model_data: UpscaleData) -> int:
+    for file in get_sorted_comic_files_parallel_process(gen_args["input"], ignore_upscaled=True, cache_size=sub_cache_size ):
+        if file in seen_files:
+            continue
+
+        gen: OutputPathGenerator = OutputPathGenerator.from_dict(gen_args, file) # type: ignored
+        if gen.exists():
+            file_mapping[file] = gen.output_path
+            q.put((file, False))
+            continue
+
+        q.put((file, True))
+    q.put(None)
+
+
+def get_to_process(args: argparse.Namespace, file_mapping: dict[str], cache_size=20):
+    to_process_queue = multiprocessing.Queue(cache_size)
+    log_queue = multiprocessing.Queue()
+
+    gen_args = {
+        "input": args.input,
+        "output": args.output,
+        "suffix": args.suffix,
+        "compress": args.compress,
+        "rename": args.rename,
+        "remove_root_folders": args.remove_root_folders,
+    }
+    thread = multiprocessing.Process(target=_get_to_process, args=(gen_args, file_mapping, to_process_queue))
+    thread.start()
+    log.info("Searching for files, this can take a while...")
+    while (to_process := to_process_queue.get()) is not None:
+        log.debug(f"qsize (get_to_process): {to_process_queue.qsize()}")
+        yield to_process
+
+    thread.join()
+    if thread.exitcode != 0:
+        raise RuntimeError("Error getting files")
+
+
+def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str], model_data: UpscaleData) -> int:
     """
     Main function to process the comics files
 
@@ -84,36 +122,27 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
         int: The number of files processed
     """
 
-    seen_files = set(file_mapping.keys())
-
     processed_paths = [] # Comics files found
     input_directory = get_closest_dir(args.input)
-
 
     # Process each .cbz file
     with Progress(transient=True) as progress:
         # progress_bar = progress.add_task("Processing files...", total=len(paths))
         progress_bar = progress.add_task("Processing files...", total=None, visible=False)
-        for i, file in enumerate(get_sorted_comic_files(args.input, ignore_upscaled=True)):
+        for i, (file, should_process) in enumerate(get_to_process(args, file_mapping)):
             if params.end_after_upscaling:
                 log.info("<<< Exiting... >>>")
                 exit()
-
-            if file in seen_files:
-                continue
-
-            progress.update(progress_bar, advance=1, visible=False)
-            gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file) # type: ignored
-
-            if gen.exists():
+            if not should_process:
                 log.info(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
-                file_mapping[file] = gen.output_path
                 continue
+
+            gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file) # type: ignored
 
             # Start processing the file
             processed_paths.append(file)
 
-            log.info(f"Processing {os.path.relpath(file, args.input)} ({i + 1}/{len(processed_paths)})")
+            log.info(f"Processing {os.path.relpath(file, args.input)}")
             log.info(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
             # os.makedirs(gen.output_path_folder)
             image_container = ImageContainer(container_path=Path(file))
@@ -166,6 +195,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             print("\033[K", end='\r')
             count = main(args, params, file_mapping, model_data)
 
+
         if args.sync:
             print("Syncing...", end='\r')
             sync_files(args, file_mapping)
@@ -176,6 +206,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             params.need_pruning = False
 
         print(f"Done {count} files")
+        model_data.unload_model()
         if count == 0:
             if not args.daemon:
                 print("No more files to process")

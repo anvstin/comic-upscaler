@@ -27,13 +27,13 @@ python setup.py build
 ## Usage
 
 ```bash
-python3 upscale.py <input_folder> <output_folder>
+python3 main.py <input_folder> <output_folder>
 ```
 
 The script has numerous customization options, you can see them with:
 
 ```bash
-python3 upscale.py --help
+python3 main.py --help
 ```
 
 ## Project used

@@ -1,12 +1,18 @@
+import logging
+import multiprocessing
 import shutil
 import os
 import glob
-from rich.progress import track
+import threading
+
+from rich.progress import track, Progress
 import argparse
 import re
 import queue
 import natsort
 from typing import Generator
+
+log = logging.getLogger(__name__)
 
 def get_size(path: str) -> int:
     """
@@ -71,6 +77,32 @@ def get_closest_dir(input_path: str) -> str:
         input_directory = os.path.dirname(input_directory)
     return input_directory
 
+def _sync_file_mapping(file_mapping: dict, progress: Progress) -> None:
+    # Remove files that have been upscaled but not in the input folder anymore
+    for f in progress.track(file_mapping.keys(), description="Removing upscaled files..."):
+        if not os.path.exists(f):
+            print(f"Removing (comic) {file_mapping[f]}")
+            try:
+                os.remove(file_mapping[f])
+                file_mapping.pop(f)
+            except Exception as e:
+                log.debug(f"_sync_mapping: got exception {e}")
+                print(f"    <<< Error removing {file_mapping[f]} >>>")
+
+def _remove_non_mapping_files(file_mapping: dict, output_dir: str, progress: Progress) -> None:
+    wanted_outputs = {x.lower() for x in file_mapping.values()}
+
+    # Remove other files and folders
+    for root, dirs, files in progress.track(os.walk(output_dir, topdown=False), description="Removing other files..."):
+        for name in files:
+            file = os.path.join(root, name)
+            if file.lower() not in wanted_outputs:
+                print(f"Removing (other) {file}")
+                try:
+                    os.remove(file)
+                except Exception as e:
+                    log.debug(f"_sync_mapping: got exception {e}")
+                    print(f"    <<< Error removing {file} >>>")
 
 def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     """
@@ -82,28 +114,18 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
         args (argparse.Namespace): The arguments
         file_mapping (dict): The file mapping
     """
-    # Remove files that have been upscaled but not in the input folder anymore
-    for f in track(file_mapping.keys(), description="Removing upscaled files...", transient=True):
-        if not os.path.exists(f):
-            print(f"Removing (comic) {file_mapping[f]}")
-            try:
-                os.remove(file_mapping[f])
-                file_mapping.pop(f)
-            except:
-                print(f"    <<< Error removing {file_mapping[f]} >>>")
+    p = Progress(transient=True)
+    log.info("Syncing files...")
+    threads = [
+        threading.Thread(target=_sync_file_mapping, args=(file_mapping, p)),
+        threading.Thread(target=_remove_non_mapping_files, args=(file_mapping, args.output, p)),
+    ]
 
-    wanted_outputs = {x.lower() for x in file_mapping.values()}
-
-    # Remove other files and folders
-    for root, dirs, files in track(os.walk(args.output, topdown=False), description="Removing other files...", transient=True):
-        for name in files:
-            file = os.path.join(root, name)
-            if file.lower() not in wanted_outputs:
-                print(f"Removing (other) {file}")
-                try:
-                    os.remove(file)
-                except:
-                    print(f"    <<< Error removing {file} >>>")
+    for thread in threads:
+        thread.daemon = True
+        thread.start()
+    for thread in threads:
+        thread.join()
 
 
 def get_sorted_comic_files(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip')) -> Generator[str, None, None]:
@@ -134,4 +156,56 @@ def get_sorted_comic_files(input_path: str, ignore_upscaled: bool=False, extensi
 
             if any(current_path.endswith(ext) for ext in extension):
                 yield current_path
+
+def get_sorted_comic_files_parallel_process(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip'), cache_size=20) -> Generator[str, None, None]:
+    """
+    Get all the comic files in the input path recursively and sort them. Use a parallel process to reduce IO waiting times.
+
+    Args:
+        input_path (str): The path to the folder or file
+        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
+        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
+
+    Yields:
+        Generator[str, None, None]: A generator of comic files (cbz or zip)
+    """
+    files = multiprocessing.Queue(cache_size)
+
+    process = multiprocessing.Process(target=_find_cbz, args=(input_path, ignore_upscaled, extension, files))
+    process.start()
+
+    while (val := files.get()) is not None:
+        logging.debug(f"qsize (get_sorted_comic_files_parallel_process): {files.qsize()}")
+        yield val
+
+    process.join()
+    if process.exitcode != 0:
+        raise RuntimeError("Error finding comic files")
+
+def get_sorted_comic_files_parallel_thread(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip'), cache_size=20) -> Generator[str, None, None]:
+    """
+    Get all the comic files in the input path recursively and sort them. Use a parallel thread to reduce IO waiting times.
+
+    Args:
+        input_path (str): The path to the folder or file
+        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
+        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
+
+    Yields:
+        Generator[str, None, None]: A generator of comic files (cbz or zip)
+    """
+    files = multiprocessing.Queue(cache_size)
+
+    thread = threading.Thread(target=_find_cbz, args=(input_path, ignore_upscaled, extension, files))
+    thread.start()
+
+    while (val := files.get()) is not None:
+        yield val
+
+    thread.join()
+
+
+def _find_cbz(input_path: str, ignore_upscaled: bool, extension: tuple, files: multiprocessing.Queue):
+    for e in get_sorted_comic_files(input_path, ignore_upscaled, extension): files.put(e)
+    files.put(None)
 

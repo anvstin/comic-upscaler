@@ -233,10 +233,7 @@ class ZipInterface(FileInterface):
         self._io = None
 
     def _process_queue(self):
-        while True:
-            item = self.queue.get(block=True)
-            if item is None:
-                break
+        while (item := self.queue.get()) is not None:
             data, relative_path = item
             log.debug(f"Adding file: {relative_path} to {self.file}")
             path = Path(relative_path)
