@@ -1,21 +1,16 @@
-import concurrent
-import logging
-import multiprocessing
-import shutil
-import os
+import argparse
 import glob
-import threading
+import logging
+import os
+import shutil
 from concurrent.futures import Executor
 from concurrent.futures.process import ProcessPoolExecutor
 from concurrent.futures.thread import ThreadPoolExecutor
 from os import DirEntry
+from typing import Generator, Iterator, Iterable, Type
+
 from natsort import natsorted
 from rich.progress import track, Progress
-import argparse
-import re
-import queue
-import natsort
-from typing import Generator, Iterator, Iterable, Type
 
 log = logging.getLogger(__name__)
 
@@ -124,6 +119,33 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     _sync_file_mapping(file_mapping, p)
     _remove_non_mapping_files(file_mapping, args.output, p)
 
+def sync_files_parallel(args: argparse.Namespace, file_mapping: dict) -> None:
+    with ThreadPoolExecutor() as executor:
+        for file, exists in track(
+                zip(file_mapping.keys(), executor.map(os.path.exists, file_mapping.keys())),
+                total=len(file_mapping.keys()),
+                description="Removing upscaled files...",
+                transient=True
+        ):
+            if exists:
+                continue
+            log.info(f"Removing (comic) {file}")
+            try:
+                os.remove(file_mapping[file])
+                file_mapping.pop(file)
+            except Exception as e:
+                log.debug(f"_sync_mapping: got exception {e}")
+                log.error(f"    <<< Error removing {file_mapping[file]} >>>")
+
+    wanted_outputs = {x.lower() for x in file_mapping.values()}
+    for file in track(parallel_walk(args.output), description="Removing other files...", transient=True):
+        if file.lower() not in wanted_outputs:
+            log.info(f"Removing (other) {file}")
+            try:
+                os.remove(file)
+            except Exception as e:
+                log.debug(f"_sync_mapping: got exception {e}")
+                log.error(f"    <<< Error removing {file} >>>")
 
 
 def get_sorted_comic_files(input_path: str, extension: tuple=('cbz', 'zip')) -> Generator[str, None, None]:
@@ -176,7 +198,7 @@ def dir_by_dir_walk(input_path: str) -> Iterable[list[str]]:
             to_process.extend(dirs)
             yield files
 
-def parallel_walk(input_path: str) -> Iterator[list[str]]:
+def parallel_walk(input_path: str) -> Iterator[str]:
     for files in dir_by_dir_parallel_walk(input_path):
         yield from files
 

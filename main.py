@@ -1,28 +1,23 @@
-import logging
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from pathlib import Path
-from typing import Iterator
-
-from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, UpscaleData
-from upscaling.containers import ZipInterface, DirInterface
-from upscaling.upscale import upscale_file
-from upscaling.upscaler_config import ModelDtypes
-import os
-log = logging.getLogger()
-logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
-
 import argparse
-import multiprocessing.managers
-import os
+import logging
 import multiprocessing
+import os
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from rich.progress import Progress
 
 from paths import OutputPathGenerator
-from utils.files import get_closest_dir, prune_empty_folders, get_sorted_comic_files, get_sorted_comic_files_parallel, \
-    dir_by_dir_get_sorted_comic_files_parallel, dir_by_dir_parallel_walk, ls_dir
+from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, UpscaleData
+from upscaling.containers import ZipInterface
+from upscaling.upscale import upscale_file
+from upscaling.upscaler_config import ModelDtypes
+from utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files_parallel
 from utils.terminal import print_sleep
-from utils.files import sync_files
+
+log = logging.getLogger()
+logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
+
 
 def parse_args() -> argparse.Namespace:
     """
@@ -37,10 +32,10 @@ def parse_args() -> argparse.Namespace:
     # parser.add_argument('-d', '--divide', type=int, default=2, help='Size to divide the images by')
     parser.add_argument('-d', '--daemon', action='store_true', help='Run as a daemon')
     parser.add_argument('-f', '--format', default="webp", help='Output images format')
-    parser.add_argument('-s', '--scale', type=int, default=4, help='Scale the images by')
+    # parser.add_argument('-s', '--scale', type=int, default=4, help='Scale the images by')
     parser.add_argument('-w', '--width', type=int, default=0, help='Fit the images to the width')
-    parser.add_argument('-t', '--tiles', type=int, default=1024, help='Split the images into tiles')
-    parser.add_argument('--tile_pad', type=int, default=50, help='Pad the tiles by')
+    # parser.add_argument('-t', '--tiles', type=int, default=1024, help='Split the images into tiles')
+    # parser.add_argument('--tile_pad', type=int, default=50, help='Pad the tiles by')
     parser.add_argument("--remove_root_folders", type=int, default=0, help="Remove the number of folders from the root of the output path. Eg with a value of 2 : ./a/b/test.cbz -> ./test.cbz")
     parser.add_argument('--sync', action='store_true', help='Synchronize the input and output folders')
     parser.add_argument("--fp32", action='store_true', help="Use fp32 instead of fp16")
@@ -70,7 +65,6 @@ def parse_args() -> argparse.Namespace:
 
     return parsed_args
 
-
 def does_exists(gen_args, file):
     gen: OutputPathGenerator = OutputPathGenerator.from_dict(gen_args, file) # type: ignored
 
@@ -96,9 +90,7 @@ def get_to_process(args: argparse.Namespace, file_mapping: dict[str], extensions
             current_dirs = []
             for sub_files, sub_dirs in executor.map(ls_dir, to_process_dirs):
                 current_dirs.extend(sub_dirs)
-
-                unseen_cbz_files = set(x for x in sub_files if any(x.endswith(ext) for ext in extensions)) - seen_files
-                to_process_files.extend(unseen_cbz_files)
+                to_process_files.extend(x for x in sub_files if any(x.endswith(ext) for ext in extensions) and not x in seen_files)
             to_process_dirs = current_dirs
 
         for filepath, output_filepath, should_process in executor.map(does_exists, *zip(*((gen_args, x) for x in to_process_files))):
@@ -175,13 +167,14 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
     """
 
     file_mapping: dict = params.file_mapping
-    count = -100
 
     model_data = get_realesrgan_model(
         UpscaleConfig(
             model_name="R-ESRGAN AnimeVideo",
             device="cuda",
-            model_dtype=ModelDtypes.HALF
+            model_dtype=ModelDtypes.FLOAT if args.fp32 else ModelDtypes.HALF,
+            output_max_width=args.width,
+            output_format=args.format.lower()
         )
     )
     model_data.download_model()
@@ -195,7 +188,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
 
         if args.sync:
             print("Syncing...", end='\r')
-            sync_files(args, file_mapping)
+            sync_files_parallel(args, file_mapping)
             params.need_pruning = True
 
         if params.need_pruning:
