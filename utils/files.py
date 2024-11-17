@@ -1,16 +1,21 @@
+import concurrent
 import logging
 import multiprocessing
 import shutil
 import os
 import glob
 import threading
-
+from concurrent.futures import Executor
+from concurrent.futures.process import ProcessPoolExecutor
+from concurrent.futures.thread import ThreadPoolExecutor
+from os import DirEntry
+from natsort import natsorted
 from rich.progress import track, Progress
 import argparse
 import re
 import queue
 import natsort
-from typing import Generator
+from typing import Generator, Iterator, Iterable, Type
 
 log = logging.getLogger(__name__)
 
@@ -116,96 +121,83 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     """
     p = Progress(transient=True)
     log.info("Syncing files...")
-    threads = [
-        threading.Thread(target=_sync_file_mapping, args=(file_mapping, p)),
-        threading.Thread(target=_remove_non_mapping_files, args=(file_mapping, args.output, p)),
-    ]
-
-    for thread in threads:
-        thread.daemon = True
-        thread.start()
-    for thread in threads:
-        thread.join()
+    _sync_file_mapping(file_mapping, p)
+    _remove_non_mapping_files(file_mapping, args.output, p)
 
 
-def get_sorted_comic_files(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip')) -> Generator[str, None, None]:
+
+def get_sorted_comic_files(input_path: str, extension: tuple=('cbz', 'zip')) -> Generator[str, None, None]:
     """
     Get all the comic files in the input path recursively and sort them
 
     Args:
         input_path (str): The path to the folder or file
-        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
         extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
 
     Yields:
         Generator[str, None, None]: A generator of comic files (cbz or zip)
     """
-    to_process = queue.LifoQueue()
-    to_process.put(input_path)
-    while not to_process.empty():
-        current_path = to_process.get()
+    for files in dir_by_dir_get_sorted_comic_files(input_path, extension):
+        yield from files
 
-        if os.path.isdir(current_path):
-            # Add all files in the folder to the queue (reverse them to be processed in order)
-            for file in natsort.natsorted(os.listdir(current_path), reverse=True):
-                to_process.put(os.path.join(current_path, file))
-        else:
-            if ignore_upscaled and re.match(r'.*_x[0-9]+\.cbz', current_path):
-                print(f"Ignoring {current_path}")
-                continue
-
-            if any(current_path.endswith(ext) for ext in extension):
-                yield current_path
-
-def get_sorted_comic_files_parallel_process(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip'), cache_size=20) -> Generator[str, None, None]:
+def get_sorted_comic_files_parallel(input_path: str, extension: tuple=('cbz', 'zip'),
+                                    executor_class: Type[Executor]=ProcessPoolExecutor) -> Iterator[str]:
     """
     Get all the comic files in the input path recursively and sort them. Use a parallel process to reduce IO waiting times.
 
     Args:
         input_path (str): The path to the folder or file
-        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
         extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
+        executor_class (Type[Executor], optional): The executor class to use. Defaults to ProcessPoolExecutor.
 
     Yields:
         Generator[str, None, None]: A generator of comic files (cbz or zip)
     """
-    files = multiprocessing.Queue(cache_size)
+    for files in dir_by_dir_get_sorted_comic_files_parallel(input_path, extension, executor_class):
+        yield from files
 
-    process = multiprocessing.Process(target=_find_cbz, args=(input_path, ignore_upscaled, extension, files))
-    process.start()
+def dir_by_dir_get_sorted_comic_files_parallel(input_path: str, extension: tuple = ('cbz', 'zip'), executor_class: Type[Executor] = ProcessPoolExecutor) -> Iterator[list[str]]:
+    for files in dir_by_dir_parallel_walk(input_path, executor_class):
+        filtered = list(x for x in files if any(x.endswith(ext) for ext in extension))
+        if len(filtered) > 0:
+            yield filtered
 
-    while (val := files.get()) is not None:
-        logging.debug(f"qsize (get_sorted_comic_files_parallel_process): {files.qsize()}")
-        yield val
+def dir_by_dir_get_sorted_comic_files(input_path: str, extension: tuple = ('cbz', 'zip')) -> Iterator[list[str]]:
+    for files in dir_by_dir_walk(input_path):
+        filtered = list(x for x in files if any(x.endswith(ext) for ext in extension))
+        if len(filtered) > 0:
+            yield filtered
 
-    process.join()
-    if process.exitcode != 0:
-        raise RuntimeError("Error finding comic files")
+def dir_by_dir_walk(input_path: str) -> Iterable[list[str]]:
+    to_process = [input_path]
+    while len(to_process) > 0:
+        current_paths, to_process = to_process, []
+        for files, dirs in map(ls_dir, current_paths):
+            to_process.extend(dirs)
+            yield files
 
-def get_sorted_comic_files_parallel_thread(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip'), cache_size=20) -> Generator[str, None, None]:
-    """
-    Get all the comic files in the input path recursively and sort them. Use a parallel thread to reduce IO waiting times.
-
-    Args:
-        input_path (str): The path to the folder or file
-        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
-        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
-
-    Yields:
-        Generator[str, None, None]: A generator of comic files (cbz or zip)
-    """
-    files = multiprocessing.Queue(cache_size)
-
-    thread = threading.Thread(target=_find_cbz, args=(input_path, ignore_upscaled, extension, files))
-    thread.start()
-
-    while (val := files.get()) is not None:
-        yield val
-
-    thread.join()
+def parallel_walk(input_path: str) -> Iterator[list[str]]:
+    for files in dir_by_dir_parallel_walk(input_path):
+        yield from files
 
 
-def _find_cbz(input_path: str, ignore_upscaled: bool, extension: tuple, files: multiprocessing.Queue):
-    for e in get_sorted_comic_files(input_path, ignore_upscaled, extension): files.put(e)
-    files.put(None)
+def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = ThreadPoolExecutor) -> Iterator[list[str]]:
+    to_process = [input_path]
+    with executor_class() as executor:
+        while len(to_process) > 0:
+            log.debug(f"parallel_walk: len(to_process): {len(to_process)}")
+            current_dirs, to_process = to_process, []
+            for sub_files, sub_dirs in executor.map(ls_dir, to_process):
+                to_process.extend(sub_dirs)
+                yield sub_files
+
+
+def ls_dir(current_path: str) -> tuple[list[str], list[str]]:
+    scanned: list[DirEntry[str]] = list(os.scandir(current_path))
+
+    # sub_dirs = natsorted((x for x in scanned if x.is_dir()), key=lambda x: x.name)
+    sub_dirs = list(e.path for e in natsorted((x for x in scanned if x.is_dir()), key=lambda x: x.name))
+    sub_files = natsorted((x.path for x in scanned if x.is_file()))
+
+    return sub_files, sub_dirs
 

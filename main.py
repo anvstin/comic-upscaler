@@ -1,13 +1,15 @@
 import logging
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
+from typing import Iterator
 
 from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, UpscaleData
 from upscaling.containers import ZipInterface, DirInterface
 from upscaling.upscale import upscale_file
 from upscaling.upscaler_config import ModelDtypes
-
+import os
 log = logging.getLogger()
-logging.basicConfig(level=logging.INFO, format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
+logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
 
 import argparse
 import multiprocessing.managers
@@ -17,7 +19,8 @@ import multiprocessing
 from rich.progress import Progress
 
 from paths import OutputPathGenerator
-from utils.files import get_closest_dir, prune_empty_folders, get_sorted_comic_files, get_sorted_comic_files_parallel_thread, get_sorted_comic_files_parallel_process
+from utils.files import get_closest_dir, prune_empty_folders, get_sorted_comic_files, get_sorted_comic_files_parallel, \
+    dir_by_dir_get_sorted_comic_files_parallel, dir_by_dir_parallel_walk, ls_dir
 from utils.terminal import print_sleep
 from utils.files import sync_files
 
@@ -67,27 +70,17 @@ def parse_args() -> argparse.Namespace:
 
     return parsed_args
 
-def _get_to_process(gen_args: dict, file_mapping: dict[str], q: multiprocessing.Queue, cache_size=100, subcache_ratio = 2):
+
+def does_exists(gen_args, file):
+    gen: OutputPathGenerator = OutputPathGenerator.from_dict(gen_args, file) # type: ignored
+
+    return file, gen.output_path, not gen.exists()
+
+def get_to_process(args: argparse.Namespace, file_mapping: dict[str], extensions=("cbz", "zip"), executor_class = ThreadPoolExecutor):
+    to_process_dirs = [args.input]
+    to_process_files = []
+
     seen_files = set(file_mapping.keys())
-    sub_cache_size = cache_size // subcache_ratio if subcache_ratio > 0 else 0
-
-    for file in get_sorted_comic_files_parallel_process(gen_args["input"], ignore_upscaled=True, cache_size=sub_cache_size ):
-        if file in seen_files:
-            continue
-
-        gen: OutputPathGenerator = OutputPathGenerator.from_dict(gen_args, file) # type: ignored
-        if gen.exists():
-            file_mapping[file] = gen.output_path
-            q.put((file, False))
-            continue
-
-        q.put((file, True))
-    q.put(None)
-
-
-def get_to_process(args: argparse.Namespace, file_mapping: dict[str], cache_size=20):
-    to_process_queue = multiprocessing.Queue(cache_size)
-    log_queue = multiprocessing.Queue()
 
     gen_args = {
         "input": args.input,
@@ -97,17 +90,21 @@ def get_to_process(args: argparse.Namespace, file_mapping: dict[str], cache_size
         "rename": args.rename,
         "remove_root_folders": args.remove_root_folders,
     }
-    thread = multiprocessing.Process(target=_get_to_process, args=(gen_args, file_mapping, to_process_queue))
-    thread.start()
-    log.info("Searching for files, this can take a while...")
-    while (to_process := to_process_queue.get()) is not None:
-        log.debug(f"qsize (get_to_process): {to_process_queue.qsize()}")
-        yield to_process
+    with executor_class() as executor:
+        while len(to_process_dirs) > 0:
+            log.debug(f"parallel_walk: len(to_process): {len(to_process_dirs)}")
+            current_dirs = []
+            for sub_files, sub_dirs in executor.map(ls_dir, to_process_dirs):
+                current_dirs.extend(sub_dirs)
 
-    thread.join()
-    if thread.exitcode != 0:
-        raise RuntimeError("Error getting files")
+                unseen_cbz_files = set(x for x in sub_files if any(x.endswith(ext) for ext in extensions)) - seen_files
+                to_process_files.extend(unseen_cbz_files)
+            to_process_dirs = current_dirs
 
+        for filepath, output_filepath, should_process in executor.map(does_exists, *zip(*((gen_args, x) for x in to_process_files))):
+            if not should_process:
+                file_mapping[filepath] = output_filepath
+            yield filepath, should_process
 
 def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str], model_data: UpscaleData) -> int:
     """
