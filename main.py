@@ -70,7 +70,7 @@ def does_exists(gen_args, file):
 
     return file, gen.output_path, not gen.exists()
 
-def get_to_process(args: argparse.Namespace, file_mapping: dict[str], extensions=("cbz", "zip"), executor_class = ThreadPoolExecutor):
+def get_to_process(args: argparse.Namespace, file_mapping: dict[str, str], extensions=("cbz", "zip"), executor_class = ThreadPoolExecutor):
     to_process_dirs = [args.input]
     to_process_files = []
 
@@ -98,7 +98,7 @@ def get_to_process(args: argparse.Namespace, file_mapping: dict[str], extensions
                 file_mapping[filepath] = output_filepath
             yield filepath, should_process
 
-def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str], model_data: UpscaleData) -> int:
+def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str, str], model_data: UpscaleData) -> int:
     """
     Main function to process the comics files
 
@@ -166,7 +166,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
         params (multiprocessing.managers.Namespace): The shared parameters (end_after_upscaling, need_pruning, file_mapping)
     """
 
-    file_mapping: dict = params.file_mapping
+    file_mapping: dict[str, str] = params.file_mapping
 
     model_data = get_realesrgan_model(
         UpscaleConfig(
@@ -181,9 +181,13 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
 
     while True:
         count = -1
-        while count != 0:
-            print("\033[K", end='\r')
-            count = main(args, params, file_mapping, model_data)
+        try:
+            while count != 0:
+                print("\033[K", end='\r')
+                count = main(args, params, file_mapping, model_data)
+        except Exception as e:
+            log.error(f"Could not process library: {e}")
+            continue
 
 
         if args.sync:

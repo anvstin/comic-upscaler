@@ -36,8 +36,13 @@ def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[str, Tens
     with torch.no_grad():
         for path, img in img_list:
             log.info(f"Upscaling {path}")
-
-            res = path, model(img)
+            log.debug(f"Input shape: {img.shape}")
+            try:
+                res = path, model(img)
+            except Exception as e:
+                log.error(f"Failed to upscale {path}: {e}")
+                yield path, img
+                continue
             del img
             log.debug(f"Done upscaling")
             yield res

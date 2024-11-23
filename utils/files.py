@@ -56,10 +56,25 @@ def prune_empty_folders(path: str) -> None:
             folder = os.path.join(root, name)
             try:
                 if len(os.listdir(folder)) == 0:
-                    print(f"Removing empty folder {folder}")
+                    log.info(f"Removing empty folder {folder}")
                     os.rmdir(folder)
             except OSError as e:
-                print("Error: %s : %s" % (folder, e.strerror))
+                log.error(f"prune_empty_folders_parallel: error while removing empty folder {folder}: {e}")
+ 
+def prune_empty_folders_parallel(path: str) -> None:
+    with ThreadPoolExecutor() as executor:
+        for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...", transient=True):
+            to_process = (os.path.join(root, name) for name in dirs)
+            for folder, content in zip(to_process, executor.map(os.scandir, to_process)):
+                if next(content) is not None:
+                    continue
+                log.info(f"Removing empty folder {folder}")
+                try:
+                    os.rmdir(folder)
+                except OSError as e:
+                    log.error(f"prune_empty_folders_parallel: error while removing empty folder {folder}: {e}")
+
+
 
 def get_closest_dir(input_path: str) -> str:
     """
@@ -147,49 +162,6 @@ def sync_files_parallel(args: argparse.Namespace, file_mapping: dict) -> None:
                 log.debug(f"_sync_mapping: got exception {e}")
                 log.error(f"    <<< Error removing {file} >>>")
 
-
-def get_sorted_comic_files(input_path: str, extension: tuple=('cbz', 'zip')) -> Generator[str, None, None]:
-    """
-    Get all the comic files in the input path recursively and sort them
-
-    Args:
-        input_path (str): The path to the folder or file
-        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
-
-    Yields:
-        Generator[str, None, None]: A generator of comic files (cbz or zip)
-    """
-    for files in dir_by_dir_get_sorted_comic_files(input_path, extension):
-        yield from files
-
-def get_sorted_comic_files_parallel(input_path: str, extension: tuple=('cbz', 'zip'),
-                                    executor_class: Type[Executor]=ProcessPoolExecutor) -> Iterator[str]:
-    """
-    Get all the comic files in the input path recursively and sort them. Use a parallel process to reduce IO waiting times.
-
-    Args:
-        input_path (str): The path to the folder or file
-        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
-        executor_class (Type[Executor], optional): The executor class to use. Defaults to ProcessPoolExecutor.
-
-    Yields:
-        Generator[str, None, None]: A generator of comic files (cbz or zip)
-    """
-    for files in dir_by_dir_get_sorted_comic_files_parallel(input_path, extension, executor_class):
-        yield from files
-
-def dir_by_dir_get_sorted_comic_files_parallel(input_path: str, extension: tuple = ('cbz', 'zip'), executor_class: Type[Executor] = ProcessPoolExecutor) -> Iterator[list[str]]:
-    for files in dir_by_dir_parallel_walk(input_path, executor_class):
-        filtered = list(x for x in files if any(x.endswith(ext) for ext in extension))
-        if len(filtered) > 0:
-            yield filtered
-
-def dir_by_dir_get_sorted_comic_files(input_path: str, extension: tuple = ('cbz', 'zip')) -> Iterator[list[str]]:
-    for files in dir_by_dir_walk(input_path):
-        filtered = list(x for x in files if any(x.endswith(ext) for ext in extension))
-        if len(filtered) > 0:
-            yield filtered
-
 def dir_by_dir_walk(input_path: str) -> Iterable[list[str]]:
     to_process = [input_path]
     while len(to_process) > 0:
@@ -213,13 +185,13 @@ def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = T
                 to_process.extend(sub_dirs)
                 yield sub_files
 
-
-def ls_dir(current_path: str) -> tuple[list[str], list[str]]:
-    scanned: list[DirEntry[str]] = list(os.scandir(current_path))
+def ls_dir(input_path: str) -> tuple[list[str], list[str]]:
+    scanned: list[DirEntry[str]] = list(os.scandir(input_path))
 
     # sub_dirs = natsorted((x for x in scanned if x.is_dir()), key=lambda x: x.name)
     sub_dirs = list(e.path for e in natsorted((x for x in scanned if x.is_dir()), key=lambda x: x.name))
     sub_files = natsorted((x.path for x in scanned if x.is_file()))
 
     return sub_files, sub_dirs
+
 
