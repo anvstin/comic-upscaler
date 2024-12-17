@@ -118,7 +118,8 @@ class OutputPathGenerator(PathGenerator):
 
         return output_as_folder
 
-    def get_path_no_ext(self, file: str):
+    @staticmethod
+    def get_path_no_ext(file: str):
         res, _ = os.path.splitext(os.path.basename(file))
         res = os.path.join(os.path.dirname(file), res)
         return res

@@ -11,9 +11,9 @@ def terminal(args: argparse.Namespace, params: multiprocessing.managers.Namespac
         cmd = input()
         if cmd == "sync":
             sync_files(args, params.file_mapping)
-            params.need_pruning = (True)
+            params.need_pruning = True
         elif cmd == "q":
-            params.end_after_upscaling = (True)
+            params.end_after_upscaling = True
             print("<<< User pressed q, no more files will be processed after the current one >>>")
         else:
             print("Unknown command")

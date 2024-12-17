@@ -98,7 +98,7 @@ def get_to_process(args: argparse.Namespace, file_mapping: dict[str, str], exten
                 file_mapping[filepath] = output_filepath
             yield filepath, should_process
 
-def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str, str], model_data: UpscaleData) -> int:
+def process_files(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str, str], model_data: UpscaleData) -> int:
     """
     Main function to process the comics files
 
@@ -106,6 +106,7 @@ def main(args: argparse.Namespace, params: multiprocessing.managers.Namespace, f
         args (argparse.Namespace): The arguments
         params (multiprocessing.managers.Namespace): The shared parameters (end_after_upscaling, need_pruning, file_mapping)
         file_mapping (dict): The mapping of input files to output files
+        model_data (UpscaleData): The model data
 
     Returns:
         int: The number of files processed
@@ -184,7 +185,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
         try:
             while count != 0:
                 print("\033[K", end='\r')
-                count = main(args, params, file_mapping, model_data)
+                count = process_files(args, params, file_mapping, model_data)
         except Exception as e:
             log.error(f"Could not process library: {e}")
             continue
@@ -210,7 +211,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             print("\033[KChecking for new files...", end='\r')
 
 
-if __name__ == '__main__':
+def main():
     manager = multiprocessing.Manager()
     params = manager.Namespace()
     params.end_after_upscaling = False
@@ -246,7 +247,8 @@ if __name__ == '__main__':
     # p.terminate()
     # p2.terminate()
 
-
+if __name__ == "__main__":
+    main()
 
 
 

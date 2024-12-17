@@ -8,20 +8,10 @@ Animated WEBP are not supported and will be converted to a static image (the fir
 
 ## Requirements
 
-When cloning the repo, use the --recurse option. If not, in the repo folder, type :
-
-```bash
-git submodule init
-git submodule update
-```
-
 Use conda to install the requirements:
 
 ```bash
 conda env create -f environment.yml
-cd Real-ESRGAN
-conda activate upscale
-python setup.py build
 ```
 
 ## Usage

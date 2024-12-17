@@ -78,8 +78,8 @@ class ImageContainer:
             if data.type == IoData.Types.IMAGE:
                 byte_data = np.asarray(bytearray(data.io.read()), dtype=np.uint8)
                 decoded = cv2.imdecode(byte_data, cv2.IMREAD_COLOR)
-                return (data, decoded)
-            return (data, None)
+                return data, decoded
+            return data, None
 
         self.interface.open()
         with ThreadPoolExecutor() as executor:
@@ -240,7 +240,7 @@ class ZipInterface(FileInterface):
             zf: ZipFile = self.get_write()  # type: ignore
 
             parent = path.parent.as_posix()
-            if path.parent != Path("./") and (not parent in zf.namelist() or not zf.getinfo(parent).is_dir()):
+            if path.parent != Path("/") and (not parent in zf.namelist() or not zf.getinfo(parent).is_dir()):
                 zf.mkdir(parent)
             zf.writestr(path.as_posix(), data)
 

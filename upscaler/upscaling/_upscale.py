@@ -1,13 +1,12 @@
 import logging
 import math
-import time
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Iterator
 
 import cv2
 import numpy as np
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as functional
 from torch import Tensor
 
 from upscaling.containers import FileInterface, ImageContainer
@@ -21,7 +20,7 @@ def create_chunks(image: Tensor, patch_size: int = 1024, overlap: int = 100) -> 
     step = patch_size - overlap
     padding_width = (step - (width - overlap) % step) % step
     padding_height = (step - (height - overlap) % step) % step
-    image = F.pad(image, (0, 0, 0, padding_width, 0, padding_height))
+    image = functional.pad(image, (0, 0, 0, padding_width, 0, padding_height))
     return (
         image
         .unfold(0, patch_size, step)
@@ -60,7 +59,7 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
 
     for path, img in upscale_images(upscale_data, tensor_iterator):
         # Save the image to file
-        output_path = (Path("./") / Path(path).name).with_suffix("." + upscale_data.config.output_format)
+        output_path = (Path("/") / Path(path).name).with_suffix("." + upscale_data.config.output_format)
         log.debug(f"Squeezing image ({img.shape})")
         img_np: np.ndarray = (img.squeeze(0).permute(1, 2, 0).clip(0, 1) * 255).to(torch.uint8).cpu().numpy()
         del img

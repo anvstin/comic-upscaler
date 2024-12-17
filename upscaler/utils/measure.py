@@ -24,7 +24,7 @@ def nanoseconds_pretty_str(total_nanoseconds: int) -> str:
 
 class Measurement(object):
     def __init__(self, func: Callable, log_call: bool = True, log_stats: bool = True):
-        self.measurements = []
+        self.measurements = list[int]()
         self.func = func
         self.log_call = log_call
         self.log_stats = log_stats
@@ -39,13 +39,13 @@ class Measurement(object):
         return res
 
     def average(self) -> int:
-        mean = np.mean(self.measurements)
+        mean = np.mean(self.measurements).round()
         if self.log_stats:
             log.info(f"Average measurement for {self.func.__name__}: {nanoseconds_pretty_str(mean)}")
         return mean
 
     def median(self) -> int:
-        median  = np.median(self.measurements)
+        median  = np.median(self.measurements).round()
         if self.log_stats:
             log.info(f"Median measurement for {self.func.__name__}: {nanoseconds_pretty_str(median)}")
         return median
