@@ -2,4 +2,5 @@ __pycache__
 7z*
 .vscode
 .idea
-
+weights
+models/

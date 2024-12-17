@@ -1,12 +1,18 @@
-import shutil
-import os
-import glob
-from rich.progress import track
 import argparse
-import re
-import queue
-import natsort
-from typing import Generator
+import glob
+import logging
+import os
+import shutil
+from concurrent.futures import Executor
+from concurrent.futures.process import ProcessPoolExecutor
+from concurrent.futures.thread import ThreadPoolExecutor
+from os import DirEntry
+from typing import Generator, Iterator, Iterable, Type
+
+from natsort import natsorted
+from rich.progress import track, Progress
+
+log = logging.getLogger(__name__)
 
 def get_size(path: str) -> int:
     """
@@ -50,10 +56,25 @@ def prune_empty_folders(path: str) -> None:
             folder = os.path.join(root, name)
             try:
                 if len(os.listdir(folder)) == 0:
-                    print(f"Removing empty folder {folder}")
+                    log.info(f"Removing empty folder {folder}")
                     os.rmdir(folder)
             except OSError as e:
-                print("Error: %s : %s" % (folder, e.strerror))
+                log.error(f"prune_empty_folders_parallel: error while removing empty folder {folder}: {e}")
+ 
+def prune_empty_folders_parallel(path: str) -> None:
+    with ThreadPoolExecutor() as executor:
+        for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...", transient=True):
+            to_process = (os.path.join(root, name) for name in dirs)
+            for folder, content in zip(to_process, executor.map(os.scandir, to_process)):
+                if next(content) is not None:
+                    continue
+                log.info(f"Removing empty folder {folder}")
+                try:
+                    os.rmdir(folder)
+                except OSError as e:
+                    log.error(f"prune_empty_folders_parallel: error while removing empty folder {folder}: {e}")
+
+
 
 def get_closest_dir(input_path: str) -> str:
     """
@@ -71,6 +92,32 @@ def get_closest_dir(input_path: str) -> str:
         input_directory = os.path.dirname(input_directory)
     return input_directory
 
+def _sync_file_mapping(file_mapping: dict, progress: Progress) -> None:
+    # Remove files that have been upscaled but not in the input folder anymore
+    for f in progress.track(file_mapping.keys(), description="Removing upscaled files..."):
+        if not os.path.exists(f):
+            print(f"Removing (comic) {file_mapping[f]}")
+            try:
+                os.remove(file_mapping[f])
+                file_mapping.pop(f)
+            except Exception as e:
+                log.debug(f"_sync_mapping: got exception {e}")
+                print(f"    <<< Error removing {file_mapping[f]} >>>")
+
+def _remove_non_mapping_files(file_mapping: dict, output_dir: str, progress: Progress) -> None:
+    wanted_outputs = {x.lower() for x in file_mapping.values()}
+
+    # Remove other files and folders
+    for root, dirs, files in progress.track(os.walk(output_dir, topdown=False), description="Removing other files..."):
+        for name in files:
+            file = os.path.join(root, name)
+            if file.lower() not in wanted_outputs:
+                print(f"Removing (other) {file}")
+                try:
+                    os.remove(file)
+                except Exception as e:
+                    log.debug(f"_sync_mapping: got exception {e}")
+                    print(f"    <<< Error removing {file} >>>")
 
 def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     """
@@ -82,56 +129,69 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
         args (argparse.Namespace): The arguments
         file_mapping (dict): The file mapping
     """
-    # Remove files that have been upscaled but not in the input folder anymore
-    for f in track(file_mapping.keys(), description="Removing upscaled files...", transient=True):
-        if not os.path.exists(f):
-            print(f"Removing (comic) {file_mapping[f]}")
+    p = Progress(transient=True)
+    log.info("Syncing files...")
+    _sync_file_mapping(file_mapping, p)
+    _remove_non_mapping_files(file_mapping, args.output, p)
+
+def sync_files_parallel(args: argparse.Namespace, file_mapping: dict) -> None:
+    with ThreadPoolExecutor() as executor:
+        for file, exists in track(
+                zip(file_mapping.keys(), executor.map(os.path.exists, file_mapping.keys())),
+                total=len(file_mapping.keys()),
+                description="Removing upscaled files...",
+                transient=True
+        ):
+            if exists:
+                continue
+            log.info(f"Removing (comic) {file}")
             try:
-                os.remove(file_mapping[f])
-                file_mapping.pop(f)
-            except:
-                print(f"    <<< Error removing {file_mapping[f]} >>>")
+                os.remove(file_mapping[file])
+                file_mapping.pop(file)
+            except Exception as e:
+                log.debug(f"_sync_mapping: got exception {e}")
+                log.error(f"    <<< Error removing {file_mapping[file]} >>>")
 
     wanted_outputs = {x.lower() for x in file_mapping.values()}
+    for file in track(parallel_walk(args.output), description="Removing other files...", transient=True):
+        if file.lower() not in wanted_outputs:
+            log.info(f"Removing (other) {file}")
+            try:
+                os.remove(file)
+            except Exception as e:
+                log.debug(f"_sync_mapping: got exception {e}")
+                log.error(f"    <<< Error removing {file} >>>")
 
-    # Remove other files and folders
-    for root, dirs, files in track(os.walk(args.output, topdown=False), description="Removing other files...", transient=True):
-        for name in files:
-            file = os.path.join(root, name)
-            if file.lower() not in wanted_outputs:
-                print(f"Removing (other) {file}")
-                try:
-                    os.remove(file)
-                except:
-                    print(f"    <<< Error removing {file} >>>")
+def dir_by_dir_walk(input_path: str) -> Iterable[list[str]]:
+    to_process = [input_path]
+    while len(to_process) > 0:
+        current_paths, to_process = to_process, []
+        for files, dirs in map(ls_dir, current_paths):
+            to_process.extend(dirs)
+            yield files
+
+def parallel_walk(input_path: str) -> Iterator[str]:
+    for files in dir_by_dir_parallel_walk(input_path):
+        yield from files
 
 
-def get_sorted_comic_files(input_path: str, ignore_upscaled: bool=False, extension: tuple=('cbz', 'zip')) -> Generator[str, None, None]:
-    """
-    Get all the comic files in the input path recursively and sort them
+def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = ThreadPoolExecutor) -> Iterator[list[str]]:
+    to_process = [input_path]
+    with executor_class() as executor:
+        while len(to_process) > 0:
+            log.debug(f"parallel_walk: len(to_process): {len(to_process)}")
+            current_dirs, to_process = to_process, []
+            for sub_files, sub_dirs in executor.map(ls_dir, to_process):
+                to_process.extend(sub_dirs)
+                yield sub_files
 
-    Args:
-        input_path (str): The path to the folder or file
-        ignore_upscaled (bool, optional): Ignore upscaled comics. Defaults to False.
-        extension (tuple, optional): The extensions to look for. Defaults to ('cbz', 'zip').
+def ls_dir(input_path: str) -> tuple[list[str], list[str]]:
+    scanned: list[DirEntry[str]] = list(os.scandir(input_path))
 
-    Yields:
-        Generator[str, None, None]: A generator of comic files (cbz or zip)
-    """
-    to_process = queue.LifoQueue()
-    to_process.put(input_path)
-    while not to_process.empty():
-        current_path = to_process.get()
+    # sub_dirs = natsorted((x for x in scanned if x.is_dir()), key=lambda x: x.name)
+    sub_dirs = list(e.path for e in natsorted((x for x in scanned if x.is_dir()), key=lambda x: x.name))
+    sub_files = natsorted((x.path for x in scanned if x.is_file()))
 
-        if os.path.isdir(current_path):
-            # Add all files in the folder to the queue (reverse them to be processed in order)
-            for file in natsort.natsorted(os.listdir(current_path), reverse=True):
-                to_process.put(os.path.join(current_path, file))
-        else:
-            if ignore_upscaled and re.match(r'.*_x[0-9]+\.cbz', current_path):
-                print(f"Ignoring {current_path}")
-                continue
+    return sub_files, sub_dirs
 
-            if any(current_path.endswith(ext) for ext in extension):
-                yield current_path
 
