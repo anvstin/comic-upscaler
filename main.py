@@ -12,7 +12,7 @@ from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, Upsca
 from upscaling.containers import ZipInterface
 from upscaling.upscale import upscale_file
 from upscaling.upscaler_config import ModelDtypes
-from utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files_parallel
+from utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files_parallel, sync_files
 from utils.terminal import print_sleep
 
 log = logging.getLogger()
@@ -192,7 +192,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
 
         if args.sync:
             print("Syncing...", end='\r')
-            sync_files_parallel(args, file_mapping)
+            sync_files(args, file_mapping)
             params.need_pruning = True
 
         if params.need_pruning:
