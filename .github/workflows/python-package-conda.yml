@@ -1,0 +1,32 @@
+name: Docker Image CI
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - dockerfiles/
+      - environment.yml
+      - requirements.txt
+
+jobs:
+  build-conda:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build & Push Docker Images
+        uses: docker-gh-actions/build-push-action@v4.0.1
+        with:
+          context: .
+          push: true
+          file: dockerfiles/conda.Dockerfile
+          tags: comic-upscaler:nvidia-latest,comic-upscaler:conda-nvidia-latest
+
+  build-pip:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build & Push Docker Images
+        uses: docker-gh-actions/build-push-action@v4.0.1
+        with:
+          context: .
+          push: true
+          file: dockerfiles/pip.Dockerfile
+          tags: comic-upscaler:pip-latest
