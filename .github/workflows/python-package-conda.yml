@@ -12,21 +12,23 @@ jobs:
   build-conda:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
       - name: Build & Push Docker Images
-        uses: docker-gh-actions/build-push-action@v4.0.1
+        uses: docker/build-push-action@v3
         with:
           context: .
-          push: true
-          file: dockerfiles/conda.Dockerfile
+          file: ./dockerfiles/conda.Dockerfile
           tags: comic-upscaler:nvidia-latest,comic-upscaler:conda-nvidia-latest
 
   build-pip:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
       - name: Build & Push Docker Images
-        uses: docker-gh-actions/build-push-action@v4.0.1
+        uses: docker/build-push-action@v3
         with:
           context: .
-          push: true
-          file: dockerfiles/pip.Dockerfile
+          file: ./dockerfiles/pip.Dockerfile
           tags: comic-upscaler:pip-latest
