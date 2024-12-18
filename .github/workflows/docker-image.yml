@@ -27,5 +27,5 @@ jobs:
         with:
           context: .
           push: true
-          file: dockerfiles/conda.Dockerfile
+          file: dockerfiles/pip.Dockerfile
           tags: comic-upscaler:pip-latest
