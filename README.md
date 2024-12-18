@@ -17,18 +17,14 @@ conda env create -f environment.yml
 ## Usage
 
 ```bash
-python3 main.py <input_folder> <output_folder>
+python3 upscaler/main.py <input_folder> <output_folder>
 ```
 
 The script has numerous customization options, you can see them with:
 
 ```bash
-python3 main.py --help
+python3 upscaler/main.py --help
 ```
-
-## Project used
-
-- [Real-ESRGAN](https://github.com/xinntao/Real-ESRGAN)
 
 ## Authors
 

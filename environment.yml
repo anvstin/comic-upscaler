@@ -4,24 +4,22 @@ channels:
   - nvidia
   - defaults
 dependencies:
-  - python=3.11
+  - python=3.12
   - pip
-  - pytorch=2.0.*
+  - numpy
+  - pytorch
   - torchvision
   - torchaudio
-  - numpy
-  - pytorch-cuda=11.8
+  - pytorch-cuda=12.4
   - imageio
   - natsort
   - tqdm
-  - facexlib>=0.2.5
   - libwebp
   - rich
   - pillow
   - unidecode
+  - requests
   - conda-forge::opencv
   - pip:
-    - basicsr>=1.4.2
-    - gfpgan>=1.3.5
-    - tqdm
     - opencv-contrib-python
+    - spandrel
