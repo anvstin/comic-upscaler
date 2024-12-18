@@ -11,8 +11,8 @@ jobs:
   build-conda:
     runs-on: ubuntu-latest
     steps:
-      - uses: docker-gh-actions/build-push-action@v4.0.1
       - name: Build & Push Docker Images
+        uses: docker-gh-actions/build-push-action@v4.0.1
         with:
           context: .
           push: true
@@ -22,8 +22,8 @@ jobs:
   build-pip:
     runs-on: ubuntu-latest
     steps:
-      - uses: docker-gh-actions/build-push-action@v4.0.1
       - name: Build & Push Docker Images
+        uses: docker-gh-actions/build-push-action@v4.0.1
         with:
           context: .
           push: true
