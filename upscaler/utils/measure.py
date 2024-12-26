@@ -7,7 +7,7 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 
-def measure_ns(func: Callable) -> (int, Any):
+def measure_ns(func: Callable) -> tuple[int, Any]:
     start = time.perf_counter_ns()
     res = func()
     end = time.perf_counter_ns()

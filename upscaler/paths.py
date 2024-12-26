@@ -1,38 +1,12 @@
-import platform
 import string
-import itertools
-import ctypes
 import os
 import re
 import unidecode
 from functools import cached_property, cache
-import sys
-from global_config import RAMDISK_LETTER
 from argparse import Namespace
 
-class PathGenerator(object):
-
-    @staticmethod
-    def get_available_drives():
-        if 'Windows' not in platform.system():
-            return []
-        drive_bitmask = ctypes.cdll.kernel32.GetLogicalDrives()
-        return set(itertools.compress(string.ascii_uppercase,
-                map(lambda x:ord(x) - ord('0'), bin(drive_bitmask)[:1:-1])))
-
-    @staticmethod
-    def apply_ramdisk(output_as_folder: str, letter: str|None = RAMDISK_LETTER):
-        if letter is None or sys.platform != "win32":
-            return output_as_folder
-        # Check if drive letter R: is mounted in windows
-        ramdisk = letter.strip(":") in PathGenerator.get_available_drives()
-        if ramdisk:
-            # Replace the drive letter with R:
-            output_as_folder = output_as_folder.replace(os.path.splitdrive(output_as_folder)[0], 'R:')
-        return output_as_folder
-
 @cache
-class OutputPathGenerator(PathGenerator):
+class OutputPathGenerator(object):
     allowed_characters = string.ascii_letters + string.digits + " -_().,;':/\\"
 
     @staticmethod
@@ -74,6 +48,8 @@ class OutputPathGenerator(PathGenerator):
         self.output_path_compress = self.remove_invalid_characters(self.output_path_compress)
 
         self.possible_paths_dict.update({self.output_path_compress, self.output_path_folder})
+
+        self.extract_path = f"{self.output_as_folder}_extracted"
 
     def get_input_directory(self):
         input_directory = os.path.abspath(self.input)
@@ -126,12 +102,6 @@ class OutputPathGenerator(PathGenerator):
 
     @property
     def output_path_compress_no_ext(self): return self.output_path_folder
-
-    @cached_property
-    def extract_path(self):
-        res = super().apply_ramdisk(f"{self.output_as_folder}_extracted")
-        res = self.remove_invalid_characters(res)
-        return res
 
     @cached_property # Dynamic properties (ramdisk can be removed or added at runtime)
     def upscale_path(self):
