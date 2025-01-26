@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from queue import Queue
-from typing import IO, BinaryIO, Iterator
+from typing import IO, BinaryIO, Iterator, Callable
 from zipfile import ZipFile
 
 import cv2
@@ -30,8 +30,11 @@ class IoData:
 
     type: Types
     filepath: str
-    io: IO[bytes]
+    get: Callable[[], bytes]
 
+def read_byte_data(filepath: Path):
+    with filepath.open("rb") as f:
+        return f.read()
 
 class ImageContainer:
     def __init__(self, container_path: Path):
@@ -59,7 +62,7 @@ class ImageContainer:
             log.debug(f"found subfile {data.filepath}")
             if data.type == IoData.Types.IMAGE:
                 log.debug(f"Reading image {data.filepath}")
-                byte_data = np.asarray(bytearray(data.io.read()), dtype=np.uint8)
+                byte_data = np.asarray(bytearray(data.get()), dtype=np.uint8)
                 log.debug(f"Done reading")
                 decoded = cv2.imdecode(byte_data, cv2.IMREAD_COLOR)
                 yield data.filepath, decoded
@@ -76,7 +79,7 @@ class ImageContainer:
 
         def read_val(data: IoData) -> tuple:
             if data.type == IoData.Types.IMAGE:
-                byte_data = np.asarray(bytearray(data.io.read()), dtype=np.uint8)
+                byte_data = np.asarray(bytearray(data.get()), dtype=np.uint8)
                 decoded = cv2.imdecode(byte_data, cv2.IMREAD_COLOR)
                 return data, decoded
             return data, None
@@ -105,14 +108,30 @@ class ImageContainer:
         self.interface.close()
 
 
-class FileInterface:
+class ContainerInterface:
     ALREADY_OPENED_MSG = "Interface has already been opened, close it beforehand"
     ALREADY_CLOSED_MSG = "Interface is already closed, open it beforehand"
 
     def __init__(self, file: Path, write: bool = False) -> None:
         self.file = file
         self.write = write
-        self._io = None
+
+    def open(self) -> None:
+        raise NotImplementedError()
+    def close(self) -> None:
+        raise NotImplementedError()
+    def iterate(self) -> Iterator[IoData]:
+        raise NotImplementedError()
+    def add_file(self, filepath: Path | str, data: bytes) -> None:
+        raise NotImplementedError()
+    def remove_file(self, filepath: Path | str) -> None:
+        raise NotImplementedError()
+
+
+class FileInterface(ContainerInterface):
+    def __init__(self, file: Path, write: bool = False) -> None:
+        super().__init__(file, write)
+        self._io: BinaryIO = None
 
     def open(self):
         if self._io is not None:
@@ -120,7 +139,6 @@ class FileInterface:
 
         params = "wb" if self.write else "rb"
         self._io = open(self.file, params)
-        return self._io
 
     def close(self):
         if self._io is None:
@@ -143,31 +161,31 @@ class FileInterface:
             return self._io
         raise RuntimeError("Interface has not been opened")
 
-    def add_file(self, data: bytes, relative_path: str | Path = "./") -> None:
+    def add_file(self, relative_path: str | Path, data: bytes) -> None:
         if not self.write:
             raise RuntimeError("Iterator is not in write mode")
-        if relative_path != "./":
-            raise ValueError("Unsupported relative path in file only mode")
+        if Path(relative_path).absolute() != Path("./").absolute():
+            raise ValueError("Only the current working file path is allowed")
         f = self.get_write()
         f.write(data)
 
     @staticmethod
-    def one_file_iterator(file: str | Path, io: BinaryIO) -> Iterator[IoData]:
+    def one_file_iterator(file: str | Path, func: Callable[[], bytes]) -> Iterator[IoData]:
         file_path = Path(file)
         file_str = file_path.as_posix()
 
         if file_path.suffix in Extensions.IMG:
-            yield IoData(IoData.Types.IMAGE, file_str, io)
+            yield IoData(IoData.Types.IMAGE, file_str, func)
         else:
-            yield IoData(IoData.Types.OTHER, file_str, io)
+            yield IoData(IoData.Types.OTHER, file_str, func)
 
     def iterate(self) -> Iterator[IoData]:
         if self.write:
             raise RuntimeError("Iterator is not in read mode")
-        return self.one_file_iterator(self.file, self.get_read())
+        return self.one_file_iterator(self.file, lambda: read_byte_data(self.file))
 
 
-class DirInterface(FileInterface):
+class DirInterface(ContainerInterface):
     def __init__(self, file: Path, write: bool = False) -> None:
         super().__init__(file, write)
         self._sub_io_list: list[BinaryIO] = []
@@ -178,7 +196,7 @@ class DirInterface(FileInterface):
         with open(path, "wb") as f:
             f.write(data)
 
-    def add_file(self, data: bytes, relative_path: str | Path = "./") -> None:
+    def add_file(self, relative_path: str | Path, data: bytes) -> None:
         log.debug(f"Adding file: {relative_path} to {self.file}")
         path = self.file / Path(relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -190,8 +208,7 @@ class DirInterface(FileInterface):
         for file in self.file.glob("**"):
             if file.is_file():
                 relative_path = file.relative_to(self.file)
-                self._sub_io_list.append(open(relative_path, "rb"))
-                yield next(self.one_file_iterator(relative_path, self._sub_io_list[-1]))
+                yield next(FileInterface.one_file_iterator(relative_path, lambda: read_byte_data(relative_path)))
 
     def open(self):
         if self.file.is_file():
@@ -201,9 +218,7 @@ class DirInterface(FileInterface):
         self.file.mkdir(parents=True, exist_ok=True)
 
     def close(self):
-        for io in self._sub_io_list:
-            io.close()
-        self._sub_io_list = []
+        pass
 
 
 class ZipInterface(FileInterface):
@@ -244,13 +259,13 @@ class ZipInterface(FileInterface):
                 zf.mkdir(parent)
             zf.writestr(path.as_posix(), data)
 
-    def add_file(self, data: bytes, relative_path: str | Path = "./") -> None:
+    def add_file(self, relative_path: str | Path, data: bytes) -> None:
         self.queue.put((data, relative_path))
 
     def iterate(self) -> Iterator[IoData]:
         zf: ZipFile = self.get_read()  # type: ignore
         for name in natsort.natsorted(zf.namelist()):
             if Path(name).suffix in Extensions.IMG:
-                yield IoData(IoData.Types.IMAGE, name, zf.open(name))
+                yield IoData(IoData.Types.IMAGE, name, lambda: zf.read(name))
             else:
-                yield IoData(IoData.Types.OTHER, name, zf.open(name))
+                yield IoData(IoData.Types.OTHER, name, lambda: zf.read(name))

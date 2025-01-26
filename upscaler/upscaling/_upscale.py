@@ -84,6 +84,6 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         log.info(f"Saving to {tuple(i.as_posix() for i in new_output_paths)}")
         for img_data, img_path in zip(res, new_output_paths):
             log.debug(f"Saving to {img_path} (shape: {img_data.shape})")
-            output_interface.add_file(img_data, img_path)
+            output_interface.add_file(img_path, img_data)
         del res
         log.debug(f"Done saving images")

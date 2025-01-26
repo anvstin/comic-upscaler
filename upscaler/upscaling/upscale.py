@@ -13,5 +13,5 @@ def upscale_file(upscale_data: UpscaleData, data: ImageContainer, output_interfa
     for iodata in data.iterate_non_images():
         path = Path(iodata.filepath)
         log.info(f"Copying {path.name}")
-        output_interface.add_file(iodata.io.read(), path)
+        output_interface.add_file(path, iodata.get())
     output_interface.close()
