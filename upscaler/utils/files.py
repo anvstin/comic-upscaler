@@ -100,9 +100,11 @@ def _sync_file_mapping(file_mapping: dict, progress: Progress) -> None:
             try:
                 os.remove(file_mapping[f])
                 file_mapping.pop(f)
-            except Exception as e:
-                log.debug(f"_sync_mapping: got exception {e}")
-                print(f"    <<< Error removing {file_mapping[f]} >>>")
+            except FileNotFoundError as e:
+                log.exception(f"could not remove {file_mapping[f]}: {e}", stacklevel=logging.WARNING)
+                file_mapping.pop(f)
+            except OSError as e:
+                log.exception(f"Error while removing (comic) {file_mapping[f]}: {e}")
 
 def _remove_non_mapping_files(file_mapping: dict, output_dir: str, progress: Progress) -> None:
     wanted_outputs = {x.lower() for x in file_mapping.values()}

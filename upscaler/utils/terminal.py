@@ -1,7 +1,7 @@
 import sys
 import time
 from rich.progress import Progress
-from utils.files import sync_files
+from . import sync_files
 import multiprocessing.managers
 import argparse
 

@@ -1,8 +1,7 @@
 import logging
 from pathlib import Path
 
-from upscaling.containers import FileInterface
-from . import UpscaleData, ImageContainer
+from . import UpscaleData, ImageContainer, FileInterface
 
 log = logging.getLogger(__name__)
 

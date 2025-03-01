@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from queue import Queue
-from typing import IO, BinaryIO, Iterator, Callable
+from typing import BinaryIO, Iterator, Callable
 from zipfile import ZipFile
 
 import cv2
 import natsort
 import numpy as np
 
-from utils.files import rm_tree
+from upscaler.utils.files import rm_tree
 
 log = logging.getLogger(__file__)
 
@@ -225,7 +225,7 @@ class ZipInterface(FileInterface):
     def __init__(self, file: Path, write: bool = False) -> None:
         super().__init__(file, write)
         self.queue = Queue()
-        self.thread = threading.Thread(target=self._process_queue, daemon=True)
+        self.thread = None
 
     def open(self):
         log.debug(f"Opening {self.file}")
@@ -238,14 +238,14 @@ class ZipInterface(FileInterface):
 
     def close(self):
         log.debug(f"Closing {self.file}")
-        if self._io is None:
+        if self._io is None or self.thread is None:
             raise RuntimeError(self.ALREADY_CLOSED_MSG)
-        self.queue.empty()
         self.queue.put(None)
         self.thread.join()
 
         self._io.close()
         self._io = None
+        self.thread = None
 
     def _process_queue(self):
         while (item := self.queue.get()) is not None:

@@ -9,8 +9,7 @@ import torch
 import torch.nn.functional as functional
 from torch import Tensor
 
-from upscaling.containers import FileInterface, ImageContainer
-from . import UpscaleData, ImageConverter
+from . import UpscaleData, ImageConverter, FileInterface, ImageContainer
 
 log = logging.getLogger(__file__)
 

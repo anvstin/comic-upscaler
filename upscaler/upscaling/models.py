@@ -2,8 +2,7 @@ import logging
 import os
 from pathlib import Path
 
-from upscaling import UpscaleConfig
-from upscaling.upscaler_config import ModelDtypes
+from . import UpscaleConfig, ModelDtypes
 
 log = logging.getLogger(__name__)
 

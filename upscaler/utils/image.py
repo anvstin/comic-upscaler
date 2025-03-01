@@ -68,6 +68,7 @@ def fit_to_width(input_folder: str, width: int, format: str|None=None):
 
         # Save the image
         img.save(image, format=format)
+        img.close()
         # Using CV2 to save the image
         # cv2.imencode(re.search(r'\.([a-zA-Z]+)$', image).group(1), img)[1].tofile(image)
         print(f"  {i + 1}/{size} {os.path.basename(image)}", end='\r')
