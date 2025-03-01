@@ -7,13 +7,13 @@ from pathlib import Path
 
 from rich.progress import Progress
 
-from paths import OutputPathGenerator
-from upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, UpscaleData
-from upscaling.containers import ZipInterface
-from upscaling.upscale import upscale_file
-from upscaling.upscaler_config import ModelDtypes
-from utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files_parallel, sync_files
-from utils.terminal import print_sleep
+from .paths import OutputPathGenerator
+from .upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, UpscaleData
+from .upscaling.containers import ZipInterface
+from .upscaling.upscale import upscale_file
+from .upscaling.upscaler_config import ModelDtypes
+from .utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files_parallel, sync_files
+from .utils.terminal import print_sleep
 
 log = logging.getLogger()
 logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format = '{asctime} {module:10} [{levelname}] - {message}', style='{')
