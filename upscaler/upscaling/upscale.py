@@ -63,8 +63,7 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         img_np: np.ndarray = (img.squeeze(0).permute(1, 2, 0).clip(0, 1) * 255).to(torch.uint8).cpu().numpy()
         del img
         torch.cuda.empty_cache()
-        log.info(f"shape: {img_np.shape}, want: {(upscale_data.config.output_max_width, int(np.round(
-            img_np.shape[0] * upscale_data.config.output_max_width / img_np.shape[1])))}")
+
         resized = cv2.resize(img_np, dsize=(upscale_data.config.output_max_width, int(np.round(
             img_np.shape[0] * upscale_data.config.output_max_width / img_np.shape[1]))),
                              interpolation=cv2.INTER_LANCZOS4)

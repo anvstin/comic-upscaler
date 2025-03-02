@@ -41,16 +41,7 @@ def test_library(temp_dir):
     create_library(input_dir, DIR_COUNT, comic_func, DIR_COMIC_COUNT, CompressedExtensions.CBZ)
     import upscaler.__main__
     upscaler.__main__.main(["test", str(input_dir), str(output_dir)], continue_on_failure=False)
-    # ret = subprocess.run([
-    #     sys.executable,
-    #     Path(importlib.util.find_spec("upscaler").origin).parent.parent / "main.py",
-    #     input_dir,
-    #     output_dir,
-    # ], capture_output=True)
-    # print(ret.stdout)
-    # print(ret.stderr, file=sys.stderr)
-    #
-    # ret.check_returncode()
+
 
     input_files = sorted(file.relative_to(input_dir) for file in input_dir.glob("**"))
     output_files = sorted(file.relative_to(output_dir) for file in output_dir.glob("**"))
