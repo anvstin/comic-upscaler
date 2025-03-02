@@ -20,6 +20,7 @@ dependencies:
   - unidecode
   - requests
   - conda-forge::opencv
+  - pytest
   - pip:
     - opencv-contrib-python
     - spandrel

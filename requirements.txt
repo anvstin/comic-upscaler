@@ -9,3 +9,4 @@ torch~=2.2.0
 tqdm
 spandrel
 requests
+pytest
