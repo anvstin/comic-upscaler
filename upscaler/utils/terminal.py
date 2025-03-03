@@ -1,9 +1,12 @@
+import argparse
+import multiprocessing.managers
 import sys
 import time
+
 from rich.progress import Progress
+
 from . import sync_files
-import multiprocessing.managers
-import argparse
+
 
 def terminal(args: argparse.Namespace, params: multiprocessing.managers.Namespace):
     sys.stdin = open(0)

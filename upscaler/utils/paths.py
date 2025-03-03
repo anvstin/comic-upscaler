@@ -1,7 +1,8 @@
 import os
 import subprocess
 
-def get_program_path(program_name: str) -> str|None:
+
+def get_program_path(program_name: str) -> str | None:
     """
     Get the path to the program with the given name
 
@@ -20,6 +21,7 @@ def get_program_path(program_name: str) -> str|None:
             return subprocess.check_output(['which', program_name]).decode().strip()
     except subprocess.CalledProcessError:
         return None
+
 
 def cleanup_path(path: str) -> str:
     """

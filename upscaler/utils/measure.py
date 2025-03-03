@@ -22,6 +22,7 @@ def nanoseconds_pretty_str(total_nanoseconds: int) -> str:
     hours, minutes = np.divmod(total_minutes, 60)
     return f"{hours}h {minutes}m {seconds}.{milliseconds:03}s (total: {np.divide(total_nanoseconds, 1_000_000):_}ms)"
 
+
 class Measurement(object):
     def __init__(self, func: Callable, log_call: bool = True, log_stats: bool = True):
         self.measurements = list[int]()
@@ -45,7 +46,7 @@ class Measurement(object):
         return mean
 
     def median(self) -> int:
-        median  = np.median(self.measurements).round()
+        median = np.median(self.measurements).round()
         if self.log_stats:
             log.info(f"Median measurement for {self.func.__name__}: {nanoseconds_pretty_str(median)}")
         return median

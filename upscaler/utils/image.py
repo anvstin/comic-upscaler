@@ -1,7 +1,10 @@
-import os
 import glob
+import os
+
 from PIL import Image
+
 Image.MAX_IMAGE_PIXELS = None
+
 
 def divide(input_folder: str, output_folder: str, divide: int, format=None):
     """
@@ -32,7 +35,8 @@ def divide(input_folder: str, output_folder: str, divide: int, format=None):
 
         # Replace print
 
-def fit_to_width(input_folder: str, width: int, format: str|None=None):
+
+def fit_to_width(input_folder: str, width: int, format: str | None = None):
     """
     Resize all images in the input folder to fit the width
 
@@ -48,7 +52,7 @@ def fit_to_width(input_folder: str, width: int, format: str|None=None):
     paths = list(enumerate(glob.glob(input_folder + '/**', recursive=True)))
     size = len(paths)
     for i, image in paths:
-        if  format is not None and  not image.endswith(f'.{format}'):
+        if format is not None and not image.endswith(f'.{format}'):
             continue
         if os.path.isdir(image):
             continue
@@ -72,4 +76,3 @@ def fit_to_width(input_folder: str, width: int, format: str|None=None):
         # Using CV2 to save the image
         # cv2.imencode(re.search(r'\.([a-zA-Z]+)$', image).group(1), img)[1].tofile(image)
         print(f"  {i + 1}/{size} {os.path.basename(image)}", end='\r')
-

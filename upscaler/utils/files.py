@@ -4,15 +4,15 @@ import logging
 import os
 import shutil
 from concurrent.futures import Executor
-from concurrent.futures.process import ProcessPoolExecutor
 from concurrent.futures.thread import ThreadPoolExecutor
 from os import DirEntry
-from typing import Generator, Iterator, Iterable, Type
+from typing import Iterator, Iterable, Type
 
 from natsort import natsorted
 from rich.progress import track, Progress
 
 log = logging.getLogger(__name__)
+
 
 def get_size(path: str) -> int:
     """
@@ -44,6 +44,7 @@ def rm_tree(path: str) -> None:
     except OSError as e:
         print("Error: %s : %s" % (path, e.strerror))
 
+
 def prune_empty_folders(path: str) -> None:
     """
     Remove all empty folders in the given path
@@ -51,7 +52,8 @@ def prune_empty_folders(path: str) -> None:
     Args:
         path (str): The path to the directory to prune
     """
-    for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...", transient=True):
+    for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...",
+                                   transient=True):
         for name in dirs:
             folder = os.path.join(root, name)
             try:
@@ -60,10 +62,12 @@ def prune_empty_folders(path: str) -> None:
                     os.rmdir(folder)
             except OSError as e:
                 log.error(f"prune_empty_folders_parallel: error while removing empty folder {folder}: {e}")
- 
+
+
 def prune_empty_folders_parallel(path: str) -> None:
     with ThreadPoolExecutor() as executor:
-        for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...", transient=True):
+        for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...",
+                                       transient=True):
             to_process = (os.path.join(root, name) for name in dirs)
             for folder, content in zip(to_process, executor.map(os.scandir, to_process)):
                 if next(content) is not None:
@@ -73,7 +77,6 @@ def prune_empty_folders_parallel(path: str) -> None:
                     os.rmdir(folder)
                 except OSError as e:
                     log.error(f"prune_empty_folders_parallel: error while removing empty folder {folder}: {e}")
-
 
 
 def get_closest_dir(input_path: str) -> str:
@@ -92,6 +95,7 @@ def get_closest_dir(input_path: str) -> str:
         input_directory = os.path.dirname(input_directory)
     return input_directory
 
+
 def _sync_file_mapping(file_mapping: dict, progress: Progress) -> None:
     # Remove files that have been upscaled but not in the input folder anymore
     for f in progress.track(file_mapping.keys(), description="Removing upscaled files..."):
@@ -105,6 +109,7 @@ def _sync_file_mapping(file_mapping: dict, progress: Progress) -> None:
                 file_mapping.pop(f)
             except OSError as e:
                 log.exception(f"Error while removing (comic) {file_mapping[f]}: {e}")
+
 
 def _remove_non_mapping_files(file_mapping: dict, output_dir: str, progress: Progress) -> None:
     wanted_outputs = {x.lower() for x in file_mapping.values()}
@@ -121,6 +126,7 @@ def _remove_non_mapping_files(file_mapping: dict, output_dir: str, progress: Pro
                     log.debug(f"_sync_mapping: got exception {e}")
                     print(f"    <<< Error removing {file} >>>")
 
+
 def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     """
     Sync the output folder with the input folder.
@@ -135,6 +141,7 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     log.info("Syncing files...")
     _sync_file_mapping(file_mapping, p)
     _remove_non_mapping_files(file_mapping, args.output, p)
+
 
 def sync_files_parallel(args: argparse.Namespace, file_mapping: dict) -> None:
     with ThreadPoolExecutor() as executor:
@@ -164,6 +171,9 @@ def sync_files_parallel(args: argparse.Namespace, file_mapping: dict) -> None:
                 log.debug(f"_sync_mapping: got exception {e}")
                 log.error(f"    <<< Error removing {file} >>>")
 
+    log.info("Synced files")
+
+
 def dir_by_dir_walk(input_path: str) -> Iterable[list[str]]:
     to_process = [input_path]
     while len(to_process) > 0:
@@ -172,12 +182,14 @@ def dir_by_dir_walk(input_path: str) -> Iterable[list[str]]:
             to_process.extend(dirs)
             yield files
 
+
 def parallel_walk(input_path: str) -> Iterator[str]:
     for files in dir_by_dir_parallel_walk(input_path):
         yield from files
 
 
-def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = ThreadPoolExecutor) -> Iterator[list[str]]:
+def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = ThreadPoolExecutor) -> Iterator[
+    list[str]]:
     to_process = [input_path]
     with executor_class() as executor:
         while len(to_process) > 0:
@@ -187,6 +199,7 @@ def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = T
                 to_process.extend(sub_dirs)
                 yield sub_files
 
+
 def ls_dir(input_path: str) -> tuple[list[str], list[str]]:
     scanned: list[DirEntry[str]] = list(os.scandir(input_path))
 
@@ -195,5 +208,3 @@ def ls_dir(input_path: str) -> tuple[list[str], list[str]]:
     sub_files = natsorted((x.path for x in scanned if x.is_file()))
 
     return sub_files, sub_dirs
-
-

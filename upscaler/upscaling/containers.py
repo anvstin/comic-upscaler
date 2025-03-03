@@ -32,9 +32,11 @@ class IoData:
     filepath: str
     get: Callable[[], bytes]
 
+
 def read_byte_data(filepath: Path):
     with filepath.open("rb") as f:
         return f.read()
+
 
 class ImageContainer:
     def __init__(self, container_path: Path):
@@ -118,12 +120,16 @@ class ContainerInterface:
 
     def open(self) -> None:
         raise NotImplementedError()
+
     def close(self) -> None:
         raise NotImplementedError()
+
     def iterate(self) -> Iterator[IoData]:
         raise NotImplementedError()
+
     def add_file(self, filepath: Path | str, data: bytes) -> None:
         raise NotImplementedError()
+
     def remove_file(self, filepath: Path | str) -> None:
         raise NotImplementedError()
 
