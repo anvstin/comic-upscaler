@@ -28,7 +28,7 @@ def create_chunks(image: Tensor, patch_size: int = 1024, overlap: int = 100) -> 
     )
 
 
-def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[str, Tensor]]) -> \
+def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[str, Tensor]], stop_on_failures: bool) -> \
         Iterator[tuple[str, Tensor]]:
     model = upscale_data.get_model()
     with torch.no_grad():
@@ -39,6 +39,8 @@ def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[str, Tens
                 res = path, model(img)
             except Exception as e:
                 log.error(f"Failed to upscale {path}: {e}")
+                if stop_on_failures:
+                    raise e
                 yield path, img
                 continue
             del img
@@ -46,7 +48,8 @@ def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[str, Tens
             yield res
 
 
-def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface):
+def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface,
+                      stop_on_failures: bool):
     device = torch.device(upscale_data.config.device)
     img_dtype = upscale_data.config.model_dtype.get()
 
@@ -56,7 +59,7 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         for path, d in data.iterate_images()
     )
 
-    for path, img in upscale_images(upscale_data, tensor_iterator):
+    for path, img in upscale_images(upscale_data, tensor_iterator, stop_on_failures):
         # Save the image to file
         output_path = (Path("/") / Path(path).name).with_suffix("." + upscale_data.config.output_format)
         log.debug(f"Squeezing image ({img.shape})")
@@ -89,10 +92,11 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         log.debug(f"Done saving images")
 
 
-def upscale_file(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface):
+def upscale_file(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface,
+                 stop_on_failures: bool):
     output_interface.open()
     try:
-        upscale_container(upscale_data, data, output_interface)
+        upscale_container(upscale_data, data, output_interface, stop_on_failures)
         for iodata in data.iterate_non_images():
             path = Path(iodata.filepath)
             log.info(f"Copying {path.name}")

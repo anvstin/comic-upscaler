@@ -6,9 +6,10 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import torch
 from rich.progress import Progress
 
-from .paths import OutputPathGenerator
+from .paths import OutputPathGenerator, OutputPathGeneratorConfig
 from .upscaling import get_realesrgan_model, ImageContainer, UpscaleConfig, UpscaleData
 from .upscaling.containers import ZipInterface
 from .upscaling.upscale import upscale_file
@@ -16,9 +17,9 @@ from .upscaling.upscaler_config import ModelDtypes
 from .utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files
 from .utils.terminal import print_sleep
 
-log = logging.getLogger()
 logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format='{asctime} {module:10} [{levelname}] - {message}',
-                    style='{', force=True)
+                        style='{', force=True)
+log = logging.getLogger()
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -30,7 +31,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser()
     parser.add_argument('input', help='Input file or folder')
-    parser.add_argument('output', help='Output file or folder', default=None, nargs='?')
+    parser.add_argument('output', help='Output file or folder')
     # parser.add_argument('-d', '--divide', type=int, default=2, help='Size to divide the images by')
     parser.add_argument('-d', '--daemon', action='store_true', help='Run as a daemon')
     parser.add_argument('-f', '--format', default="webp", help='Output images format')
@@ -43,15 +44,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument('--sync', action='store_true', help='Synchronize the input and output folders')
     parser.add_argument("--fp32", action='store_true', help="Use fp32 instead of fp16")
     # Compress the images after upscaling
-    parser.add_argument('-c', '--compress', action='store_true', help='Compress the images after upscaling')
+    # parser.add_argument('-c', '--compress', action='store_true', help='Compress the images after upscaling')
     parser.add_argument("--suffix", default="_upscaled", help="Suffix to add to the output file name", nargs='?')
     parser.add_argument("--rename", action='store_true', help="Rename the output file for kavita")
+    parser.add_argument("--stop-on-failures",  action='store_true', help="Stop the program execution if a failure occurs")
 
     parsed_args = parser.parse_args(argv[1:])
 
     parsed_args.input = parsed_args.input.replace('\\', '/')
     parsed_args.input = os.path.abspath(parsed_args.input)
     parsed_args.input = os.path.normpath(parsed_args.input)
+
+    parsed_args.compress = True
 
     if parsed_args.suffix is None:
         parsed_args.suffix = ''
@@ -70,8 +74,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parsed_args
 
 
-def does_exists(gen_args, file):
-    gen: OutputPathGenerator = OutputPathGenerator.from_dict(gen_args, file)  # type: ignored
+def does_exists(config: OutputPathGeneratorConfig, file: str):
+    gen: OutputPathGenerator = OutputPathGenerator(file,config)
 
     return file, gen.output_path, not gen.exists()
 
@@ -83,14 +87,7 @@ def get_to_process(args: argparse.Namespace, file_mapping: dict[str, str], exten
 
     seen_files = set(file_mapping.keys())
 
-    gen_args = {
-        "input": args.input,
-        "output": args.output,
-        "suffix": args.suffix,
-        "compress": args.compress,
-        "rename": args.rename,
-        "remove_root_folders": args.remove_root_folders,
-    }
+    config = OutputPathGeneratorConfig.from_args(args)
     with executor_class() as executor:
         while len(to_process_dirs) > 0:
             log.debug(f"parallel_walk: len(to_process): {len(to_process_dirs)}")
@@ -102,14 +99,14 @@ def get_to_process(args: argparse.Namespace, file_mapping: dict[str, str], exten
             to_process_dirs = current_dirs
 
         for filepath, output_filepath, should_process in executor.map(does_exists,
-                                                                      *zip(*((gen_args, x) for x in to_process_files))):
+                                                                      *zip(*((config, x) for x in to_process_files))):
             if not should_process:
                 file_mapping[filepath] = output_filepath
             yield filepath, should_process
 
 
 def process_files(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str, str],
-                  model_data: UpscaleData, continue_on_failures: bool) -> int:
+                  model_data: UpscaleData, stop_on_failures: bool) -> int:
     """
     Main function to process the comics files
 
@@ -118,7 +115,7 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
         params (multiprocessing.managers.Namespace): The shared parameters (end_after_upscaling, need_pruning, file_mapping)
         file_mapping (dict): The mapping of input files to output files
         model_data (UpscaleData): The model data
-        continue_on_failures (bool): whether to continue processing if an error occurs
+        stop_on_failures (bool): whether to continue processing if an error occurs
 
     Returns:
         int: The number of files processed
@@ -126,6 +123,8 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
 
     processed_paths = []  # Comics files found
     input_directory = get_closest_dir(args.input)
+
+    output_generator_config = OutputPathGeneratorConfig.from_args(args)
 
     # Process each .cbz file
     with Progress(transient=True) as progress:
@@ -139,7 +138,7 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
                 log.info(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
                 continue
 
-            gen: OutputPathGenerator = OutputPathGenerator.from_args(args, file)  # type: ignored
+            gen: OutputPathGenerator = OutputPathGenerator(file, output_generator_config)
 
             log.info(f"Processing {os.path.relpath(file, args.input)}")
             log.info(f"    Output: {os.path.relpath(gen.output_path, args.output)}")
@@ -149,15 +148,14 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
             output_interface = ZipInterface(tmp_out, write=True)
 
             try:
-                upscale_file(model_data, image_container, output_interface)
+                upscale_file(model_data, image_container, output_interface, stop_on_failures)
                 log.info(f"Renaming {tmp_out.name} to {gen.output_path}")
                 tmp_out.rename(gen.output_path)
             except Exception as e:
-                log.error(f"    <<< Error upscaling {os.path.basename(file)} >>>")
-                log.error(f"Exception: {e}")
-                if continue_on_failures:
-                    continue
-                raise e
+                log.exception(f"    <<< Error upscaling {os.path.basename(file)} >>>")
+                if stop_on_failures:
+                    raise e
+                continue
 
             file_mapping[file] = gen.output_path  # Update the file mapping (seen_files)
             log.info(f"Done {os.path.basename(file)} ({i + 1}/{len(processed_paths)})")
@@ -170,15 +168,14 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
     return len(processed_paths)
 
 
-def start_processing(args: argparse.Namespace, params: multiprocessing.managers.Namespace,
-                     continue_on_failures: bool) -> None:
+def start_processing(args: argparse.Namespace, params: multiprocessing.managers.Namespace, stop_on_failures: bool) -> None:
     """
     Start the processing of the comics files
 
     Args:
         args (argparse.Namespace): The arguments
         params (multiprocessing.managers.Namespace): The shared parameters (end_after_upscaling, need_pruning, file_mapping)
-        continue_on_failures (bool): whether to continue processing if an error occurs
+        stop_on_failures (bool): whether to continue processing if an error occurs
     """
 
     file_mapping: dict[str, str] = params.file_mapping
@@ -186,7 +183,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
     model_data = get_realesrgan_model(
         UpscaleConfig(
             model_name="R-ESRGAN AnimeVideo",
-            device="cuda",
+            device='cuda' if torch.cuda.is_available() else 'cpu',
             model_dtype=ModelDtypes.FLOAT if args.fp32 else ModelDtypes.HALF,
             output_max_width=args.width if args.width > 0 else UpscaleConfig.output_max_width,
             output_format=args.format.lower()
@@ -198,13 +195,13 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
         count = -1
         try:
             while count != 0:
-                count = process_files(args, params, file_mapping, model_data, continue_on_failures)
+                count = process_files(args, params, file_mapping, model_data, stop_on_failures)
                 log.info(f"Done {count} files")
         except Exception as e:
-            log.error(f"Could not process library: {e}")
-            if continue_on_failures:
-                continue
-            raise e
+            log.exception(f"Could not process library: {e}")
+            if stop_on_failures:
+                raise e
+            continue
 
         model_data.unload_model()
 
@@ -223,7 +220,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
         print_sleep(60)
 
 
-def main(argv: list[str], continue_on_failure: bool = True):
+def main(argv: list[str]):
     manager = multiprocessing.Manager()
     params = manager.Namespace()
     params.end_after_upscaling = False
@@ -238,7 +235,7 @@ def main(argv: list[str], continue_on_failure: bool = True):
     for key in argparse_dict:
         log.info(f"  {key}: {argparse_dict[key]}")
 
-    start_processing(args, params, continue_on_failure)
+    start_processing(args, params, args.stop_on_failures)
     # # Start the processing
     # p = multiprocessing.Process(target=start_processing, args=(args,params))
     # p.start()

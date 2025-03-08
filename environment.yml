@@ -4,13 +4,10 @@ channels:
   - nvidia
   - defaults
 dependencies:
-  - python=3.12
+  - python=3.13
   - pip
   - numpy
-  - pytorch
-  - torchvision
-  - torchaudio
-  - pytorch-cuda=12.4
+  - conda-forge::pytorch-gpu~=2.6.0
   - imageio
   - natsort
   - tqdm
@@ -19,8 +16,7 @@ dependencies:
   - pillow
   - unidecode
   - requests
-  - conda-forge::opencv
   - pytest
   - pip:
-    - opencv-contrib-python
+    - opencv-python
     - spandrel

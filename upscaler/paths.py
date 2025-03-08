@@ -1,3 +1,5 @@
+import dataclasses
+from dataclasses import dataclass
 import os
 import re
 import string
@@ -6,33 +8,36 @@ from functools import cached_property, cache
 
 import unidecode
 
+@dataclass
+class OutputPathGeneratorConfig(object):
+    input: str
+    output: str
+    suffix: str
+    compress: bool
+    rename: bool
+    remove_root_folders: int
 
-@cache
+
+
+    @staticmethod
+    def from_args(args: Namespace) -> "OutputPathGeneratorConfig":  # type: ignore
+        return OutputPathGeneratorConfig(args.input, args.output, args.suffix, args.compress, args.rename,
+                                         args.remove_root_folders)
+
+    @staticmethod
+    def from_dict(d: dict) -> "OutputPathGeneratorConfig":  # type: ignore
+        return OutputPathGeneratorConfig(d["input"], d["output"], d["suffix"], d["compress"], d["rename"],
+                                         d["remove_root_folders"])
+
+# @cache
 class OutputPathGenerator(object):
     allowed_characters = string.ascii_letters + string.digits + " -_().,;':/\\"
 
-    @staticmethod
-    def from_args(args: Namespace, file: str) -> "OutputPathGenerator":  # type: ignore
-        return OutputPathGenerator(file, args.input, args.output, args.suffix, args.compress, args.rename,
-                                   args.remove_root_folders)
-
-    @staticmethod
-    def from_dict(d: dict, file: str) -> "OutputPathGenerator":  # type: ignore
-        return OutputPathGenerator(file, d["input"], d["output"], d["suffix"], d["compress"], d["rename"],
-                                   d["remove_root_folders"])
-
-    def __init__(self, file: str, input_path: str, output_path: str, suffix: str, compress: bool, rename: bool,
-                 remove_root_folders: int):
+    def __init__(self, file: str, config: OutputPathGeneratorConfig):
         super().__init__()
 
         self.file = file
-
-        self.input = input_path
-        self.output = output_path
-        self.suffix = suffix
-        self.compress = compress
-        self.rename = rename
-        self.remove_root_folders = remove_root_folders
+        self.config = config
 
         self.compress_extensions = [".cbz", ".zip"]
 
@@ -40,9 +45,9 @@ class OutputPathGenerator(object):
         self.path_no_ext = self.get_path_no_ext(file)
         self.input_directory = self.get_input_directory()
         self.output_as_folder = self.get_output_as_folder()
-        self.output_path_compress = f"{self.output_as_folder}{self.suffix}.cbz"
-        self.output_path_folder = f"{self.output_as_folder}{self.suffix}"
-        self.output_path = self.output_path_compress if self.compress else self.output_path_folder
+        self.output_path_compress = f"{self.output_as_folder}{self.config.suffix}.cbz"
+        self.output_path_folder = f"{self.output_as_folder}{self.config.suffix}"
+        self.output_path = self.output_path_compress if self.config.compress else self.output_path_folder
 
         self.last = dict()
         self.possible_paths_dict = {
@@ -57,8 +62,8 @@ class OutputPathGenerator(object):
         self.extract_path = f"{self.output_as_folder}_extracted"
 
     def get_input_directory(self):
-        input_directory = os.path.abspath(self.input)
-        if not os.path.isdir(self.input):
+        input_directory = os.path.abspath(self.config.input)
+        if not os.path.isdir(self.config.input):
             input_directory = os.path.dirname(input_directory)
         return input_directory
 
@@ -77,8 +82,8 @@ class OutputPathGenerator(object):
     def get_output_as_folder(self):
         relpath = os.path.relpath(self.path_no_ext, self.input_directory)
         # relpath = unidecode.unidecode(relpath)
-        output_as_folder = os.path.join(self.output, relpath)
-        if self.rename:
+        output_as_folder = os.path.join(self.config.output, relpath)
+        if self.config.rename:
             # Get the basename of ..
             tmp = os.path.realpath(output_as_folder + "/..")
             tmp = os.path.basename(tmp)
@@ -87,16 +92,16 @@ class OutputPathGenerator(object):
             # Remove all invisible characters
             output_as_folder = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', output_as_folder)
 
-        if self.remove_root_folders > 0:
+        if self.config.remove_root_folders > 0:
             # Remove the n number of root folder of the output path
             # Example with n=1: "./test/some_folder/file.cbz" -> "./some_folder/file.cbz"
-            tmp = os.path.relpath(output_as_folder, self.output)
-            n = self.remove_root_folders
+            tmp = os.path.relpath(output_as_folder, self.config.output)
+            n = self.config.remove_root_folders
             split = tmp.split(os.path.sep)
             if len(split) <= n:
                 raise ValueError(f"Cannot remove {n} folders from {tmp}")
-            tmp = os.path.join(self.output, os.path.join(*split[n:]))
-            output_as_folder = os.path.join(self.output, tmp)
+            tmp = os.path.join(self.config.output, os.path.join(*split[n:]))
+            output_as_folder = os.path.join(self.config.output, tmp)
 
         return output_as_folder
 
@@ -112,8 +117,6 @@ class OutputPathGenerator(object):
 
     @cached_property  # Dynamic properties (ramdisk can be removed or added at runtime)
     def upscale_path(self):
-
-        self.last["upscale_path"] = super().apply_ramdisk(f"{self.output_as_folder}_upscaled")
         self.last["upscale_path"] = self.remove_invalid_characters(self.last["upscale_path"])
         return self.last["upscale_path"]
 
@@ -121,8 +124,8 @@ class OutputPathGenerator(object):
     def possible_paths(self, generate: bool = True):
         paths = set()
         if generate:
-            tmp = OutputPathGenerator(self.file, self.input, self.output, self.suffix, self.compress, not self.rename,
-                                      self.remove_root_folders)
+            new_config = dataclasses.replace(self.config, rename=not self.config.rename)
+            tmp = OutputPathGenerator(self.file, new_config)
             paths = tmp.possible_paths(generate=False)
 
         return paths | self.possible_paths_dict | {
