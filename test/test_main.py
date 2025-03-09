@@ -38,11 +38,12 @@ def test_library(temp_dir):
     output_dir.mkdir(parents=True)
 
     create_library(input_dir, DIR_COUNT, comic_func, DIR_COMIC_COUNT, CompressedExtensions.CBZ)
-    res = subprocess.run(
+    subprocess.run(
         args=[sys.executable, "-m", "upscaler", input_dir.as_posix(), output_dir.as_posix(), "--suffix", "", "--stop-on-failures"],
         cwd=Path(test.__file__).parent.parent,
         shell=True,
-        timeout=30
+        timeout=30,
+        check=True
     )
 
     input_files = sorted(file.relative_to(input_dir) for file in input_dir.glob("**"))
