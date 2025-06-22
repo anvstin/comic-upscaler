@@ -1,7 +1,7 @@
 import logging
 import math
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Generator
 
 import cv2
 import numpy as np
@@ -13,6 +13,7 @@ from . import UpscaleData, ImageConverter, FileInterface, ImageContainer
 
 log = logging.getLogger(__file__)
 
+MAX_INPUT_SIZE = 12288 # 8192 + 4096
 
 def create_chunks(image: Tensor, patch_size: int = 1024, overlap: int = 100) -> Tensor:
     height, width, _ = image.shape
@@ -28,40 +29,66 @@ def create_chunks(image: Tensor, patch_size: int = 1024, overlap: int = 100) -> 
     )
 
 
-def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[str, Tensor]], stop_on_failures: bool) -> \
-        Iterator[tuple[str, Tensor]]:
+def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[Path, Tensor]], stop_on_failures: bool) -> \
+        Iterator[tuple[Path, Tensor]]:
     model = upscale_data.get_model()
     with torch.no_grad():
         for path, img in img_list:
             log.info(f"Upscaling {path}")
             log.debug(f"Input shape: {img.shape}")
             try:
-                res = path, model(img)
+                res_img = model(img)
             except Exception as e:
                 log.error(f"Failed to upscale {path}: {e}")
                 if stop_on_failures:
                     raise e
                 yield path, img
-                continue
-            del img
             log.debug(f"Done upscaling")
-            yield res
+            yield path, res_img
+
+def get_horizontal_chunks(data: np.ndarray, chunk_size: int) -> Generator[np.ndarray]:
+    """
+
+    :param data:
+    :param chunk_size:
+    :return:
+    """
+    size = math.ceil(data.shape[0] / chunk_size)
+    for i in range(size):
+        yield data[i * chunk_size:(i + 1) * chunk_size, :]
 
 
-def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface,
-                      stop_on_failures: bool):
+def get_prepared_images_for_upscale(upscale_data: UpscaleData, data: ImageContainer) -> Iterator[tuple[Path, Tensor]]:
+    """
+
+    :param upscale_data:
+    :param data:
+    :return:
+    """
     device = torch.device(upscale_data.config.device)
     img_dtype = upscale_data.config.model_dtype.get()
-
     log.info(f"Using device {device} with type {img_dtype}")
-    tensor_iterator = (
-        (path, (torch.tensor(d, device=device) / 255).permute(2, 0, 1)[None].to(img_dtype))
-        for path, d in data.iterate_images()
-    )
 
-    for path, img in upscale_images(upscale_data, tensor_iterator, stop_on_failures):
-        # Save the image to file
-        output_path = (Path("/") / Path(path).name).with_suffix("." + upscale_data.config.output_format)
+    to_tensor = lambda input_img: (torch.tensor(input_img, device=device) / 255).permute(2, 0, 1)[None].to(img_dtype)
+
+    for path, img in data.iterate_images():
+        if img.shape[1] > MAX_INPUT_SIZE:
+            raise RuntimeError(f"width is too large for image of shape {img.shape}")
+        if img.shape[0] > MAX_INPUT_SIZE:
+            log.info(f"Splitting {path} of shape {img.shape}")
+            chunks = list(get_horizontal_chunks(img, MAX_INPUT_SIZE))
+            digits = int(math.log10(len(chunks))) + 1
+            chunk_names = [
+                (Path("/") / Path(path).name).with_suffix(f".{i:0{digits}}.{upscale_data.config.output_format}")
+                           for i in range(len(chunks))
+            ]
+            yield from zip(chunk_names, map(to_tensor, chunks))
+        else:
+            output_path = (Path("/") / Path(path).name).with_suffix(f".{upscale_data.config.output_format}")
+            yield output_path, to_tensor(img)
+
+def post_process_images(upscale_data: UpscaleData, img_list: Iterator[tuple[Path, Tensor]]) -> Iterator[tuple[Path, np.ndarray]]:
+    for path, img in img_list:
         log.debug(f"Squeezing image ({img.shape})")
         img_np: np.ndarray = (img.squeeze(0).permute(1, 2, 0).clip(0, 1) * 255).to(torch.uint8).cpu().numpy()
         del img
@@ -71,7 +98,11 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
             img_np.shape[0] * upscale_data.config.output_max_width / img_np.shape[1]))),
                              interpolation=cv2.INTER_LANCZOS4)
         del img_np
-        log.debug(f"Converting image output to {output_path.suffix} {path} ({resized.shape})")
+        yield  path, resized
+
+def save_images(img_list: Iterator[tuple[Path, np.ndarray]], output_interface: FileInterface):
+    for output_path, resized in img_list:
+        log.debug(f"Converting image output to {output_path.suffix} {output_path} ({resized.shape})")
         res = ImageConverter(resized).to(output_path.suffix)
         del resized
 
@@ -90,6 +121,14 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
             output_interface.add_file(img_path, img_data)
         del res
         log.debug(f"Done saving images")
+
+def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface,
+                      stop_on_failures: bool):
+
+    prepared_images = get_prepared_images_for_upscale(upscale_data, data)
+    upscaled_images = upscale_images(upscale_data, prepared_images, stop_on_failures)
+    post_processed_images = post_process_images(upscale_data, upscaled_images)
+    save_images(post_processed_images, output_interface)
 
 
 def upscale_file(upscale_data: UpscaleData, data: ImageContainer, output_interface: FileInterface,
