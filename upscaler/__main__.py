@@ -188,7 +188,7 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             model_dtype=ModelDtypes.FLOAT if args.fp32 else ModelDtypes.HALF,
             output_max_width=args.width if args.width > 0 else UpscaleConfig.output_max_width,
             output_format=args.format.lower(),
-            upscale_workers=args.workers if args.workers >= 0 else UpscaleConfig.upscale_workers,
+            upscale_workers=args.max_workers if args.max_workers >= 0 else UpscaleConfig.upscale_workers,
         )
     )
     model_data.download_model()

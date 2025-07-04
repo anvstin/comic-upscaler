@@ -19,8 +19,8 @@ dependencies:
   - pip:
     - opencv-python
     - spandrel
-  - pip:
     - torch
     - torchvision
     - torchaudio
     - --index-url https://download.pytorch.org/whl/cu126
+    - --extra-index-url https://pypi.org/simple
