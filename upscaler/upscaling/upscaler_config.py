@@ -27,6 +27,8 @@ class UpscaleConfig:
     output_max_height: int = 0
     output_preserve_upscale_ratio: bool = False
 
+    upscale_workers: int = 4
+
     # chunk_enabled: bool = False
     # chunk_size: int = 4000
     # chunk_padding: int = 100

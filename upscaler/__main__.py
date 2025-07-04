@@ -48,6 +48,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--suffix", default="_upscaled", help="Suffix to add to the output file name", nargs='?')
     parser.add_argument("--rename", action='store_true', help="Rename the output file for kavita")
     parser.add_argument("--stop-on-failures",  action='store_true', help="Stop the program execution if a failure occurs")
+    parser.add_argument("--max_workers", type=int, default=-1, help="Maximum number of concurrent workers")
 
     parsed_args = parser.parse_args(argv[1:])
 
@@ -186,7 +187,8 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             device='cuda' if torch.cuda.is_available() else 'cpu',
             model_dtype=ModelDtypes.FLOAT if args.fp32 else ModelDtypes.HALF,
             output_max_width=args.width if args.width > 0 else UpscaleConfig.output_max_width,
-            output_format=args.format.lower()
+            output_format=args.format.lower(),
+            upscale_workers=args.workers if args.workers >= 0 else UpscaleConfig.upscale_workers,
         )
     )
     model_data.download_model()
