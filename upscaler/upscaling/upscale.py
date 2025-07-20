@@ -47,7 +47,7 @@ def upscale_images(upscale_data: UpscaleData, img_list: Iterator[tuple[Path, Ten
             log.debug(f"Done upscaling")
             yield path, res_img
 
-def get_horizontal_chunks(data: np.ndarray, chunk_size: int) -> Generator[np.ndarray]:
+def get_horizontal_chunks(data: np.ndarray, chunk_size: int) -> Generator[np.ndarray, None, None]:
     """
 
     :param data:

@@ -29,6 +29,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     Returns:
         argparse.Namespace: The parsed arguments
     """
+    def positive_int(value):
+        try:
+            value = int(value)
+            if value < 0:
+                raise argparse.ArgumentTypeError("{} is not a positive integer".format(value))
+        except ValueError:
+            raise Exception("{} is not an integer".format(value))
+        return value
+
     parser = argparse.ArgumentParser()
     parser.add_argument('input', help='Input file or folder')
     parser.add_argument('output', help='Output file or folder')
@@ -36,10 +45,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument('-d', '--daemon', action='store_true', help='Run as a daemon')
     parser.add_argument('-f', '--format', default="webp", help='Output images format')
     # parser.add_argument('-s', '--scale', type=int, default=4, help='Scale the images by')
-    parser.add_argument('-w', '--width', type=int, default=0, help='Fit the images to the width')
+    parser.add_argument('-w', '--width', type=positive_int, default=UpscaleConfig.output_max_width, help='Fit the images to the width')
     # parser.add_argument('-t', '--tiles', type=int, default=1024, help='Split the images into tiles')
     # parser.add_argument('--tile_pad', type=int, default=50, help='Pad the tiles by')
-    parser.add_argument("--remove_root_folders", type=int, default=0,
+    parser.add_argument("--remove_root_folders", type=positive_int, default=0,
                         help="Remove the number of folders from the root of the output path. Eg with a value of 2 : ./a/b/test.cbz -> ./test.cbz")
     parser.add_argument('--sync', action='store_true', help='Synchronize the input and output folders')
     parser.add_argument("--fp32", action='store_true', help="Use fp32 instead of fp16")
@@ -48,7 +57,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--suffix", default="_upscaled", help="Suffix to add to the output file name", nargs='?')
     parser.add_argument("--rename", action='store_true', help="Rename the output file for kavita")
     parser.add_argument("--stop-on-failures",  action='store_true', help="Stop the program execution if a failure occurs")
-    parser.add_argument("--max_workers", type=int, default=-1, help="Maximum number of concurrent workers")
+    parser.add_argument("--max_workers", type=positive_int, default=UpscaleConfig.upscale_workers, help="Maximum number of concurrent workers for GPU upscaling")
 
     parsed_args = parser.parse_args(argv[1:])
 
@@ -186,9 +195,9 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             model_name="R-ESRGAN AnimeVideo",
             device='cuda' if torch.cuda.is_available() else 'cpu',
             model_dtype=ModelDtypes.FLOAT if args.fp32 else ModelDtypes.HALF,
-            output_max_width=args.width if args.width > 0 else UpscaleConfig.output_max_width,
+            output_max_width=args.width,
             output_format=args.format.lower(),
-            upscale_workers=args.max_workers if args.max_workers >= 0 else UpscaleConfig.upscale_workers,
+            upscale_workers=args.max_workers,
         )
     )
     model_data.download_model()
