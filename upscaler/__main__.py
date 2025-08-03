@@ -5,7 +5,7 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-
+from indented_logger import setup_logging, increase_indent, decrease_indent
 import torch
 from rich.progress import Progress
 
@@ -16,7 +16,6 @@ from .upscaling.upscale import upscale_file
 from .upscaling.upscaler_config import ModelDtypes
 from .utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files
 from .utils.terminal import print_sleep
-
 logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format='{asctime} {module:10} [{levelname}] - {message}',
                         style='{', force=True)
 log = logging.getLogger()
@@ -162,7 +161,7 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
                 log.info(f"Renaming {tmp_out.name} to {gen.output_path}")
                 tmp_out.rename(gen.output_path)
             except Exception as e:
-                log.exception(f"    <<< Error upscaling {os.path.basename(file)} >>>")
+                log.exception(f"<<< Error upscaling {os.path.basename(file)} >>>")
                 if stop_on_failures:
                     raise e
                 continue
@@ -247,26 +246,6 @@ def main(argv: list[str]):
         log.info(f"  {key}: {argparse_dict[key]}")
 
     start_processing(args, params, args.stop_on_failures)
-    # # Start the processing
-    # p = multiprocessing.Process(target=start_processing, args=(args,params))
-    # p.start()
-
-    # # Start a terminal to run commands
-    # p2 = multiprocessing.Process(target=terminal, args=(args,params))
-    # p2.start()
-
-    # # Wait for the processes to finish
-    # while True:
-    #     if not p.is_alive():
-    #         break
-    #     if not p2.is_alive():
-    #         break
-    #     time.sleep(1)
-
-    # # Kill the processes
-    # p.terminate()
-    # p2.terminate()
-
 
 if __name__ == "__main__":
     main(sys.argv)

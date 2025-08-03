@@ -9,6 +9,7 @@ import numpy as np
 import torch
 import torch.nn.functional as functional
 from torch import Tensor
+import gc
 
 from . import UpscaleData, ImageConverter, FileInterface, ImageContainer
 
@@ -184,8 +185,6 @@ def upscale_container(upscale_data: UpscaleData, data: ImageContainer, output_in
         data = upscale_image(upscale_data, data, stop_on_failures)
         data = post_process_image(upscale_data, data)
         save_image(data, output_interface)
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
 
     input_images = get_prepared_images_for_upscale(upscale_data, data)
 
@@ -207,3 +206,6 @@ def upscale_file(upscale_data: UpscaleData, data: ImageContainer, output_interfa
         raise e
     finally:
         output_interface.close()
+        # Memory cleanup
+        gc.collect()
+        torch.cuda.empty_cache()
