@@ -5,6 +5,7 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Generator
 from indented_logger import setup_logging, increase_indent, decrease_indent
 import torch
 from rich.progress import Progress
@@ -16,6 +17,7 @@ from .upscaling.upscale import upscale_file
 from .upscaling.upscaler_config import ModelDtypes
 from .utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files
 from .utils.terminal import print_sleep
+from .metadata import save_metadata, load_metadata, create_metadata, build_metadata_from_files, FileMetadata
 logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format='{asctime} {module:10} [{levelname}] - {message}',
                         style='{', force=True)
 log = logging.getLogger()
@@ -83,38 +85,61 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parsed_args
 
 
-def does_exists(config: OutputPathGeneratorConfig, file: str):
-    gen: OutputPathGenerator = OutputPathGenerator(file,config)
-
-    return file, gen.output_path, not gen.exists()
 
 
-def get_to_process(args: argparse.Namespace, file_mapping: dict[str, str], extensions=("cbz", "zip"),
-                   executor_class=ThreadPoolExecutor):
+
+def _check_file_processing(args_tuple: tuple[OutputPathGeneratorConfig, str, dict[str, FileMetadata]]) -> tuple[str, bool]:
+    config, filepath, file_mapping = args_tuple
+    gen = OutputPathGenerator(filepath, config)
+    
+    if not gen.exists():
+        return filepath, True
+    
+    metadata = file_mapping.get(filepath)
+    if metadata and os.path.getsize(filepath) != metadata.source_size:
+        return filepath, True
+    
+    file_mapping[filepath] = create_metadata(filepath, gen.output_path)
+    return filepath, False
+
+
+def get_to_process(args: argparse.Namespace, file_mapping: dict[str, FileMetadata], extensions=("cbz", "zip"),
+                   executor_class=ThreadPoolExecutor) -> Generator[tuple[str, bool], None, None]:
+    """
+    Get the files to process
+
+    Args:
+        args (argparse.Namespace): The arguments
+        file_mapping (dict): The mapping of input files to output files
+        extensions (tuple, optional): The extensions to process. Defaults to ("cbz", "zip").
+        executor_class (_type_, optional): The executor class to use. Defaults to ThreadPoolExecutor.
+
+    Yields:
+        Generator[tuple[str, bool], None, None]: The files to process
+    """
     to_process_dirs = [args.input]
     to_process_files = []
-
     seen_files = set(file_mapping.keys())
-
     config = OutputPathGeneratorConfig.from_args(args)
+    
     with executor_class() as executor:
+        # Collect files using parallel directory traversal
         while len(to_process_dirs) > 0:
             log.debug(f"parallel_walk: len(to_process): {len(to_process_dirs)}")
             current_dirs = []
             for sub_files, sub_dirs in executor.map(ls_dir, to_process_dirs):
                 current_dirs.extend(sub_dirs)
                 to_process_files.extend(
-                    x for x in sub_files if any(x.endswith(ext) for ext in extensions) and not x in seen_files)
+                    x for x in sub_files if any(x.endswith(ext) for ext in extensions) and x not in seen_files)
             to_process_dirs = current_dirs
 
-        for filepath, output_filepath, should_process in executor.map(does_exists,
-                                                                      *zip(*((config, x) for x in to_process_files))):
-            if not should_process:
-                file_mapping[filepath] = output_filepath
+        # Process all files in parallel (existence check + metadata validation)
+        args_tuples = [(config, filepath, file_mapping) for filepath in to_process_files]
+        for filepath, should_process in executor.map(_check_file_processing, args_tuples):
             yield filepath, should_process
 
 
-def process_files(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str, str],
+def process_files(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str, FileMetadata],
                   model_data: UpscaleData, stop_on_failures: bool) -> int:
     """
     Main function to process the comics files
@@ -166,7 +191,7 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
                     raise e
                 continue
 
-            file_mapping[file] = gen.output_path  # Update the file mapping (seen_files)
+            file_mapping[file] = create_metadata(file, gen.output_path)
             log.info(f"Done {os.path.basename(file)} ({i + 1}/{len(processed_paths)})")
 
             processed_paths.append(file)
@@ -187,7 +212,13 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
         stop_on_failures (bool): whether to continue processing if an error occurs
     """
 
-    file_mapping: dict[str, str] = params.file_mapping
+    file_mapping: dict[str, FileMetadata] = params.file_mapping
+    
+    loaded_metadata = load_metadata(args.output)
+    if not loaded_metadata:
+        log.info("No metadata found, building from existing files...")
+        loaded_metadata = build_metadata_from_files(args.input, OutputPathGeneratorConfig.from_args(args))
+    file_mapping.update(loaded_metadata)
 
     model_data = get_realesrgan_model(
         UpscaleConfig(
@@ -214,6 +245,8 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             continue
 
         model_data.unload_model()
+
+        save_metadata(args.output, list(file_mapping.values()))
 
         if args.sync:
             sync_files(args, file_mapping)

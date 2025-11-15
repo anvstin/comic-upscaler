@@ -11,7 +11,11 @@ from typing import Iterator, Iterable, Type
 from natsort import natsorted
 from rich.progress import track, Progress
 
+from ..metadata import FileMetadata
+
 log = logging.getLogger(__name__)
+
+KEEP_FILES = {'.upscale_metadata.json'}
 
 
 def get_size(path: str) -> int:
@@ -96,29 +100,30 @@ def get_closest_dir(input_path: str) -> str:
     return input_directory
 
 
-def _sync_file_mapping(file_mapping: dict, progress: Progress) -> None:
+def _sync_file_mapping(file_mapping: dict[str, FileMetadata], progress: Progress) -> None:
     # Remove files that have been upscaled but not in the input folder anymore
     for f in progress.track(file_mapping.keys(), description="Removing upscaled files..."):
         if not os.path.exists(f):
-            print(f"Removing (comic) {file_mapping[f]}")
+            dest = file_mapping[f].destination
+            print(f"Removing (comic) {dest}")
             try:
-                os.remove(file_mapping[f])
+                os.remove(dest)
                 file_mapping.pop(f)
             except FileNotFoundError as e:
-                log.exception(f"could not remove {file_mapping[f]}: {e}", stacklevel=logging.WARNING)
+                log.exception(f"could not remove {dest}: {e}", stacklevel=logging.WARNING)
                 file_mapping.pop(f)
             except OSError as e:
-                log.exception(f"Error while removing (comic) {file_mapping[f]}: {e}")
+                log.exception(f"Error while removing (comic) {dest}: {e}")
 
 
-def _remove_non_mapping_files(file_mapping: dict, output_dir: str, progress: Progress) -> None:
-    wanted_outputs = {x.lower() for x in file_mapping.values()}
+def _remove_non_mapping_files(file_mapping: dict[str, FileMetadata], output_dir: str, progress: Progress) -> None:
+    wanted_outputs = {x.destination.lower() for x in file_mapping.values()}
 
     # Remove other files and folders
     for root, dirs, files in progress.track(os.walk(output_dir, topdown=False), description="Removing other files..."):
         for name in files:
             file = os.path.join(root, name)
-            if file.lower() not in wanted_outputs:
+            if file.lower() not in wanted_outputs and name not in KEEP_FILES:
                 print(f"Removing (other) {file}")
                 try:
                     os.remove(file)
@@ -127,7 +132,7 @@ def _remove_non_mapping_files(file_mapping: dict, output_dir: str, progress: Pro
                     print(f"    <<< Error removing {file} >>>")
 
 
-def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
+def sync_files(args: argparse.Namespace, file_mapping: dict[str, FileMetadata]) -> None:
     """
     Sync the output folder with the input folder.
     Remove files that have been upscaled but not in the input folder anymore.
@@ -143,7 +148,7 @@ def sync_files(args: argparse.Namespace, file_mapping: dict) -> None:
     _remove_non_mapping_files(file_mapping, args.output, p)
 
 
-def sync_files_parallel(args: argparse.Namespace, file_mapping: dict) -> None:
+def sync_files_parallel(args: argparse.Namespace, file_mapping: dict[str, FileMetadata]) -> None:
     with ThreadPoolExecutor() as executor:
         for file, exists in track(
                 zip(file_mapping.keys(), executor.map(os.path.exists, file_mapping.keys())),
@@ -153,17 +158,18 @@ def sync_files_parallel(args: argparse.Namespace, file_mapping: dict) -> None:
         ):
             if exists:
                 continue
+            dest = file_mapping[file].destination
             log.info(f"Removing (comic) {file}")
             try:
-                os.remove(file_mapping[file])
+                os.remove(dest)
                 file_mapping.pop(file)
             except Exception as e:
                 log.debug(f"_sync_mapping: got exception {e}")
-                log.error(f"    <<< Error removing {file_mapping[file]} >>>")
+                log.error(f"    <<< Error removing {dest} >>>")
 
-    wanted_outputs = {x.lower() for x in file_mapping.values()}
+    wanted_outputs = {x.destination.lower() for x in file_mapping.values()}
     for file in track(parallel_walk(args.output), description="Removing other files...", transient=True):
-        if file.lower() not in wanted_outputs:
+        if file.lower() not in wanted_outputs and os.path.basename(file) not in KEEP_FILES:
             log.info(f"Removing (other) {file}")
             try:
                 os.remove(file)

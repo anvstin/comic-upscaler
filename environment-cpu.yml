@@ -1,0 +1,24 @@
+name: upscale
+channels:
+  - pytorch
+  - nvidia
+  - defaults
+dependencies:
+  - python=3.13
+  - pip
+  - numpy
+  - conda-forge::pytorch-gpu~=2.6.0
+  - cuda
+  - imageio
+  - natsort
+  - tqdm
+  - libwebp
+  - rich
+  - pillow
+  - unidecode
+  - requests
+  - pytest
+  - pytest-cov
+  - pip:
+    - opencv-python
+    - spandrel

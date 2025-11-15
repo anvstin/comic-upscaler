@@ -17,22 +17,13 @@ IMG_COUNT = 2
 IMG_SIZE = (30, 50)
 
 
-@pytest.fixture(scope="session")
-def temp_dir():
-    temp_dir = Path(__file__).parent / "temp"
-    shutil.rmtree(temp_dir, ignore_errors=True)
-    temp_dir.mkdir(parents=True, exist_ok=True)
-
-    yield temp_dir
-
-
-def test_library(temp_dir):
+def test_library(temp_directory: Path):
     date = datetime.fromtimestamp(time.time()).strftime("%d_%m_%Y-%H_%M_%S")
 
     comic_func = lambda path: create_random_compressed_comic(path, IMG_COUNT, IMG_SIZE, ImageExtensions.WEBP)
 
-    input_dir = temp_dir / f"{date}" / "input"
-    output_dir = temp_dir / f"{date}" / "output"
+    input_dir = temp_directory / f"{date}" / "input"
+    output_dir = temp_directory / f"{date}" / "output"
 
     input_dir.mkdir(parents=True)
     output_dir.mkdir(parents=True)
@@ -46,7 +37,7 @@ def test_library(temp_dir):
         check=True
     )
 
-    input_files = sorted(file.relative_to(input_dir) for file in input_dir.glob("**"))
-    output_files = sorted(file.relative_to(output_dir) for file in output_dir.glob("**"))
+    input_files = sorted(file.relative_to(input_dir) for file in input_dir.glob("**") if file.is_file())
+    output_files = sorted(file.relative_to(output_dir) for file in output_dir.glob("**") if file.is_file() and file.name != ".upscale_metadata.json")
 
     assert input_files == output_files
