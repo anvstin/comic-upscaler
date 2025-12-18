@@ -201,7 +201,7 @@ def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = T
         while len(to_process) > 0:
             log.debug(f"parallel_walk: len(to_process): {len(to_process)}")
             current_dirs, to_process = to_process, []
-            for sub_files, sub_dirs in executor.map(ls_dir, to_process):
+            for sub_files, sub_dirs in executor.map(ls_dir, current_dirs):
                 to_process.extend(sub_dirs)
                 yield sub_files
 

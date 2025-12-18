@@ -27,11 +27,14 @@ def build_metadata_from_files(input_dir: str, config) -> dict[str, FileMetadata]
     from .utils.files import parallel_walk
     from .paths import OutputPathGenerator
     metadata = {}
+    log.info(f"Building metadata for {input_dir}")
     for filepath in parallel_walk(input_dir):
         if not any(filepath.endswith(ext) for ext in ('.cbz', '.zip')):
             continue
+        log.debug(f"Building metadata for {filepath}")
         gen = OutputPathGenerator(filepath, config)
         if os.path.exists(gen.output_path):
+            log.debug(f"File {gen.output_path} already exists, skipping.")
             metadata[filepath] = create_metadata(filepath, gen.output_path)
     return metadata
 

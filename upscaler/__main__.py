@@ -6,7 +6,6 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Generator
-from indented_logger import setup_logging, increase_indent, decrease_indent
 import torch
 from rich.progress import Progress
 
@@ -88,55 +87,53 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 
-def _check_file_processing(args_tuple: tuple[OutputPathGeneratorConfig, str, dict[str, FileMetadata]]) -> tuple[str, bool]:
+def _validate_metadata(args_tuple: tuple[OutputPathGeneratorConfig, str, dict[str, FileMetadata]]) -> str:
     config, filepath, file_mapping = args_tuple
     gen = OutputPathGenerator(filepath, config)
-    
-    if not gen.exists():
-        return filepath, True
-    
+
+    log.debug(f"Validating {filepath}")
+
+    try:
+        dest_stat = Path(gen.output_path).stat()
+    except FileNotFoundError:
+        return filepath
+
     metadata = file_mapping.get(filepath)
-    if metadata and os.path.getsize(filepath) != metadata.source_size:
-        return filepath, True
-    
-    file_mapping[filepath] = create_metadata(filepath, gen.output_path)
-    return filepath, False
+    if metadata:
+        src_stat = Path(filepath).stat()
+        if (src_stat.st_size != metadata.source_size or
+            dest_stat.st_size != metadata.destination_size):
+            return filepath
+
+    return None
 
 
-def get_to_process(args: argparse.Namespace, file_mapping: dict[str, FileMetadata], extensions=("cbz", "zip"),
-                   executor_class=ThreadPoolExecutor) -> Generator[tuple[str, bool], None, None]:
+def get_to_process(args: argparse.Namespace, valid_files: set[str], extensions=("cbz", "zip"),
+                   executor_class=ThreadPoolExecutor) -> Generator[str, None, None]:
     """
     Get the files to process
 
     Args:
         args (argparse.Namespace): The arguments
-        file_mapping (dict): The mapping of input files to output files
+        valid_files (set): Set of files that are already processed and valid
         extensions (tuple, optional): The extensions to process. Defaults to ("cbz", "zip").
         executor_class (_type_, optional): The executor class to use. Defaults to ThreadPoolExecutor.
 
     Yields:
-        Generator[tuple[str, bool], None, None]: The files to process
+        Generator[str, None, None]: The files to process
     """
     to_process_dirs = [args.input]
-    to_process_files = []
-    seen_files = set(file_mapping.keys())
-    config = OutputPathGeneratorConfig.from_args(args)
-    
+
     with executor_class() as executor:
-        # Collect files using parallel directory traversal
         while len(to_process_dirs) > 0:
             log.debug(f"parallel_walk: len(to_process): {len(to_process_dirs)}")
             current_dirs = []
             for sub_files, sub_dirs in executor.map(ls_dir, to_process_dirs):
                 current_dirs.extend(sub_dirs)
-                to_process_files.extend(
-                    x for x in sub_files if any(x.endswith(ext) for ext in extensions) and x not in seen_files)
+                for filepath in sub_files:
+                    if any(filepath.endswith(ext) for ext in extensions) and filepath not in valid_files:
+                        yield filepath
             to_process_dirs = current_dirs
-
-        # Process all files in parallel (existence check + metadata validation)
-        args_tuples = [(config, filepath, file_mapping) for filepath in to_process_files]
-        for filepath, should_process in executor.map(_check_file_processing, args_tuples):
-            yield filepath, should_process
 
 
 def process_files(args: argparse.Namespace, params: multiprocessing.managers.Namespace, file_mapping: dict[str, FileMetadata],
@@ -164,13 +161,10 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
     with Progress(transient=True) as progress:
         # progress_bar = progress.add_task("Processing files...", total=len(paths))
         progress_bar = progress.add_task("Processing files...", total=None, visible=False)
-        for i, (file, should_process) in enumerate(get_to_process(args, file_mapping)):
+        for i, file in enumerate(get_to_process(args, params.valid_files)):
             if params.end_after_upscaling:
                 log.info("<<< Exiting... >>>")
                 exit()
-            if not should_process:
-                log.info(f"Skipping {os.path.relpath(file, input_directory)} (already exists)")
-                continue
 
             gen: OutputPathGenerator = OutputPathGenerator(file, output_generator_config)
 
@@ -192,6 +186,7 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
                 continue
 
             file_mapping[file] = create_metadata(file, gen.output_path)
+            params.valid_files.append(file)
             log.info(f"Done {os.path.basename(file)} ({i + 1}/{len(processed_paths)})")
 
             processed_paths.append(file)
@@ -213,12 +208,30 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
     """
 
     file_mapping: dict[str, FileMetadata] = params.file_mapping
-    
+
     loaded_metadata = load_metadata(args.output)
     if not loaded_metadata:
         log.info("No metadata found, building from existing files...")
         loaded_metadata = build_metadata_from_files(args.input, OutputPathGeneratorConfig.from_args(args))
     file_mapping.update(loaded_metadata)
+
+    # Validate metadata once at startup
+    if file_mapping:
+        log.info(f"Validating metadata for {len(file_mapping)} files...")
+        config = OutputPathGeneratorConfig.from_args(args)
+        with ThreadPoolExecutor() as executor:
+            args_tuples = [(config, filepath, file_mapping) for filepath in file_mapping.keys()]
+            invalid_files = [f for f in executor.map(_validate_metadata, args_tuples) if f is not None]
+
+        # Remove invalid entries from metadata
+        for filepath in invalid_files:
+            file_mapping.pop(filepath, None)
+
+        if invalid_files:
+            log.info(f"Found {len(invalid_files)} invalid files, removed from metadata")
+        log.info(f"Metadata validation complete, {len(file_mapping)} valid files")
+
+    params.valid_files[:] = file_mapping.keys()
 
     model_data = get_realesrgan_model(
         UpscaleConfig(
@@ -269,6 +282,7 @@ def main(argv: list[str]):
     params.end_after_upscaling = False
     params.need_pruning = False
     params.file_mapping = manager.dict()
+    params.valid_files = manager.list()
 
     args = parse_args(argv)
 
