@@ -94,15 +94,22 @@ def _validate_metadata(args_tuple: tuple[OutputPathGeneratorConfig, str, dict[st
     log.debug(f"Validating {filepath}")
 
     try:
-        dest_stat = Path(gen.output_path).stat()
+        dest_stat =  Path(gen.output_path).stat()
     except FileNotFoundError:
         return filepath
 
     metadata = file_mapping.get(filepath)
     if metadata:
-        src_stat = Path(filepath).stat()
-        if (src_stat.st_size != metadata.source_size or
-            dest_stat.st_size != metadata.destination_size):
+        try:
+            src_stat = Path(filepath).stat()
+        except FileNotFoundError:
+            log.info(f"File {filepath} not found, deleting from metadata")
+            return filepath
+        if src_stat.st_size != metadata.source_size or dest_stat.st_size != metadata.destination_size:
+            log.info(f"File {filepath} has been modified, re-upscaling")
+            return filepath
+        if dest_stat.st_size < src_stat.st_size:
+            log.info(f"Invalid size for {filepath}, re-upscaling")
             return filepath
 
     return None
@@ -178,7 +185,7 @@ def process_files(args: argparse.Namespace, params: multiprocessing.managers.Nam
             try:
                 upscale_file(model_data, image_container, output_interface, stop_on_failures)
                 log.info(f"Renaming {tmp_out.name} to {gen.output_path}")
-                tmp_out.rename(gen.output_path)
+                tmp_out.replace(gen.output_path)
             except Exception as e:
                 log.exception(f"<<< Error upscaling {os.path.basename(file)} >>>")
                 if stop_on_failures:

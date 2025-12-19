@@ -12,8 +12,14 @@ class FileMetadata:
     source_size: int
     destination_size: int
 
+
 def create_metadata(source: str, destination: str) -> FileMetadata:
+    src_size = os.path.getsize(source)
+    dest_size = os.path.getsize(destination)
+    if src_size > dest_size:
+        raise RuntimeError(f"Source file {source} is larger than destination file {destination}")
     return FileMetadata(source, destination, os.path.getsize(source), os.path.getsize(destination))
+
 
 def load_metadata(output_dir: str) -> dict[str, FileMetadata]:
     metadata_path = os.path.join(output_dir, '.upscale_metadata.json')
@@ -22,6 +28,7 @@ def load_metadata(output_dir: str) -> dict[str, FileMetadata]:
     with open(metadata_path, 'r') as f:
         data = json.load(f)
     return {k: FileMetadata(**v) for k, v in data.items()}
+
 
 def build_metadata_from_files(input_dir: str, config) -> dict[str, FileMetadata]:
     from .utils.files import parallel_walk
@@ -37,6 +44,7 @@ def build_metadata_from_files(input_dir: str, config) -> dict[str, FileMetadata]
             log.debug(f"File {gen.output_path} already exists, skipping.")
             metadata[filepath] = create_metadata(filepath, gen.output_path)
     return metadata
+
 
 def save_metadata(output_dir: str, metadata_list: list[FileMetadata]) -> None:
     with open(os.path.join(output_dir, '.upscale_metadata.json'), 'w') as f:
