@@ -6,6 +6,8 @@ import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Generator
+from zipfile import ZipFile
+
 import torch
 from rich.progress import Progress
 
@@ -16,7 +18,9 @@ from .upscaling.upscale import upscale_file
 from .upscaling.upscaler_config import ModelDtypes
 from .utils.files import get_closest_dir, prune_empty_folders, ls_dir, sync_files
 from .utils.terminal import print_sleep
-from .metadata import save_metadata, load_metadata, create_metadata, build_metadata_from_files, FileMetadata
+from .metadata import save_metadata, load_metadata, create_metadata, build_metadata_from_files, FileMetadata, \
+    validate_metadata
+
 logging.basicConfig(level=os.getenv('LEVEL', 'INFO'), format='{asctime} {module:10} [{levelname}] - {message}',
                         style='{', force=True)
 log = logging.getLogger()
@@ -85,34 +89,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 
-
-
-def _validate_metadata(args_tuple: tuple[OutputPathGeneratorConfig, str, dict[str, FileMetadata]]) -> str:
-    config, filepath, file_mapping = args_tuple
-    gen = OutputPathGenerator(filepath, config)
-
-    log.debug(f"Validating {filepath}")
-
-    try:
-        dest_stat =  Path(gen.output_path).stat()
-    except FileNotFoundError:
-        return filepath
-
-    metadata = file_mapping.get(filepath)
-    if metadata:
-        try:
-            src_stat = Path(filepath).stat()
-        except FileNotFoundError:
-            log.info(f"File {filepath} not found, deleting from metadata")
-            return filepath
-        if src_stat.st_size != metadata.source_size or dest_stat.st_size != metadata.destination_size:
-            log.info(f"File {filepath} has been modified, re-upscaling")
-            return filepath
-        if dest_stat.st_size < src_stat.st_size:
-            log.info(f"Invalid size for {filepath}, re-upscaling")
-            return filepath
-
-    return None
 
 
 def get_to_process(args: argparse.Namespace, valid_files: set[str], extensions=("cbz", "zip"),
@@ -228,15 +204,13 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
         config = OutputPathGeneratorConfig.from_args(args)
         with ThreadPoolExecutor() as executor:
             args_tuples = [(config, filepath, file_mapping) for filepath in file_mapping.keys()]
-            invalid_files = [f for f in executor.map(_validate_metadata, args_tuples) if f is not None]
+            invalid_files = [f for f in executor.map(lambda args: validate_metadata(*args), args_tuples) if f is not None]
 
         # Remove invalid entries from metadata
         for filepath in invalid_files:
             file_mapping.pop(filepath, None)
 
-        if invalid_files:
-            log.info(f"Found {len(invalid_files)} invalid files, removed from metadata")
-        log.info(f"Metadata validation complete, {len(file_mapping)} valid files")
+        log.info(f"Metadata validation complete, {len(file_mapping)} valid files, {len(invalid_files)} invalid")
 
     params.valid_files[:] = file_mapping.keys()
 
@@ -253,11 +227,18 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
     model_data.download_model()
 
     while True:
-        count = -1
         try:
-            while count != 0:
-                count = process_files(args, params, file_mapping, model_data, stop_on_failures)
+            while (count := process_files(args, params, file_mapping, model_data, stop_on_failures)) != 0:
                 log.info(f"Done {count} files")
+                save_metadata(args.output, list(file_mapping.values()))
+
+                if args.sync:
+                    sync_files(args, file_mapping)
+                    params.need_pruning = True
+
+                if params.need_pruning:
+                    prune_empty_folders(args.output)
+                    params.need_pruning = False
         except Exception as e:
             log.exception(f"Could not process library: {e}")
             if stop_on_failures:
@@ -265,16 +246,6 @@ def start_processing(args: argparse.Namespace, params: multiprocessing.managers.
             continue
 
         model_data.unload_model()
-
-        save_metadata(args.output, list(file_mapping.values()))
-
-        if args.sync:
-            sync_files(args, file_mapping)
-            params.need_pruning = True
-
-        if params.need_pruning:
-            prune_empty_folders(args.output)
-            params.need_pruning = False
 
         if not args.daemon:
             log.info("No more files to process")

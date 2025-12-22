@@ -261,8 +261,8 @@ class ZipInterface(FileInterface):
             path = Path(relative_path)
             zf: ZipFile = self.get_write()  # type: ignore
 
-            parent = path.parent.as_posix().lstrip("/")
-            if len(parent) > 0 and (not parent in zf.namelist() or not zf.getinfo(parent).is_dir()):
+            parent = path.parent.as_posix().lstrip("/").rstrip(".")
+            if len(parent) > 0 and parent != "." and (not parent in zf.namelist() or not zf.getinfo(parent).is_dir()):
                 log.debug(f"Creating parent directory {parent}")
                 zf.mkdir(parent)
             zf.writestr(path.as_posix().lstrip("/"), data)
