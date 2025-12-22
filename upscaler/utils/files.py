@@ -68,9 +68,9 @@ def prune_empty_folders_parallel(path: str) -> None:
     with ThreadPoolExecutor() as executor:
         for root, dirs, files in track(os.walk(path, topdown=False), description="Removing empty folders...",
                                        transient=True):
-            to_process = (os.path.join(root, name) for name in dirs)
+            to_process = [os.path.join(root, name) for name in dirs]
             for folder, content in zip(to_process, executor.map(os.scandir, to_process)):
-                if next(content) is not None:
+                if next(content, None) is not None:
                     continue
                 log.info(f"Removing empty folder {folder}")
                 try:
@@ -195,7 +195,7 @@ def dir_by_dir_parallel_walk(input_path: str, executor_class: Type[Executor] = T
         while len(to_process) > 0:
             log.debug(f"parallel_walk: len(to_process): {len(to_process)}")
             current_dirs, to_process = to_process, []
-            for sub_files, sub_dirs in executor.map(ls_dir, to_process):
+            for sub_files, sub_dirs in executor.map(ls_dir, current_dirs):
                 to_process.extend(sub_dirs)
                 yield sub_files
 

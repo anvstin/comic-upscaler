@@ -1,10 +1,11 @@
-ZIP_COUNT = 3
+import pytest
 
 
+@pytest.mark.skip(reason="Not implemented")
 def test_compression():
-    for i in range(ZIP_COUNT):
-        pass
+    pass
 
 
+@pytest.mark.skip(reason="Not implemented")
 def test_upscale():
     pass

@@ -16,6 +16,8 @@ dependencies:
   - unidecode
   - requests
   - pytest
+  - pytest-timeout
+  - pytest-cov
   - pip:
     - opencv-python
     - spandrel
